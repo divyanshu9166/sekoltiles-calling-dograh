@@ -1,0 +1,13 @@
+node_modules/
+.next/
+.env
+.env*.local
+logs/
+*.log
+tsconfig.tsbuildinfo
+ai-agent/venv/
+venv/
+ai-agent/__pycache__/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,35 @@
+{
+  "name": "autozentic-ai-calling-agent",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate deploy",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "6.19.3",
+    "@prisma/client": "6.19.3",
+    "lucide-react": "0.577.0",
+    "next": "16.3.4",
+    "pg": "8.20.0",
+    "prisma": "6.19.3",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.1.14",
+    "@types/node": "25.5.0",
+    "@types/pg": "8.20.0",
+    "@types/react": "19.2.14",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.1.6",
+    "tailwindcss": "4.1.14",
+    "typescript": "5.9.3"
+  }
+}

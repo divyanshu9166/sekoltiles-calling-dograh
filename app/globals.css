@@ -1,0 +1,837 @@
+@import "tailwindcss";
+
+/* Disable Tailwind v4's automatic prefers-color-scheme dark mode.
+   The CRM is designed as a light-only app. Without this override,
+   users with OS dark mode enabled see inverted colors on every
+   component using design tokens (bg-surface, text-foreground, etc.). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Light mode — warm, professional CRM palette */
+  /* NOTE: plain `@theme` (not `@theme inline`) is required so Tailwind utilities
+     compile to `var(--color-*)` references instead of inlining literal hex values.
+     This is what lets the `[data-brand="homzentic"]` overrides below re-skin the
+     entire UI at runtime. Furniture values are emitted on :root unchanged, so the
+     furniture vertical renders identically. */
+  --color-background: #f5f5f4;
+  --color-foreground: #292524;
+  --color-surface: #ffffff;
+  --color-surface-hover: #fafaf9;
+  --color-surface-light: #f5f5f4;
+  --color-card: #ffffff;
+  --color-card-foreground: #292524;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #292524;
+  --color-primary: #b45309;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f5f5f4;
+  --color-secondary-foreground: #292524;
+  --color-input: #e7e5e4;
+  --color-ring: rgba(180, 83, 9, 0.28);
+  --color-destructive: #b91c1c;
+  --color-border: #e7e5e4;
+  --color-border-light: #d6d3d1;
+  --color-muted: #78716c;
+  --color-muted-foreground: #78716c;
+  --color-accent: #b45309;
+  --color-accent-foreground: #ffffff;
+  --color-accent-hover: #92400e;
+  --color-accent-light: rgba(180, 83, 9, 0.07);
+  --color-teal: #0f766e;
+  --color-teal-light: rgba(15, 118, 110, 0.07);
+  --color-success: #15803d;
+  --color-success-light: rgba(21, 128, 61, 0.07);
+  --color-danger: #b91c1c;
+  --color-danger-light: rgba(185, 28, 28, 0.07);
+  --color-warning: #a16207;
+  --color-warning-light: rgba(161, 98, 7, 0.07);
+  --color-info: #1d4ed8;
+  --color-info-light: rgba(29, 78, 216, 0.07);
+  --color-purple: #6d28d9;
+  --color-purple-light: rgba(109, 40, 217, 0.07);
+  --color-pink: #be185d;
+  --color-pink-light: rgba(190, 24, 93, 0.07);
+  --color-glass: #ffffff;
+  --color-glass-border: #e7e5e4;
+  --color-sidebar: #1c1917;
+  --color-sidebar-active: rgba(255, 255, 255, 0.1);
+  --font-sans: "Roboto Mono", ui-monospace, monospace;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-glow: none;
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-slide-up: slide-up 0.3s ease-out;
+  --animate-slide-in-left: slide-in-left 0.2s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d6d3d1 transparent;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Card utility */
+.glass-card {
+  background: var(--color-glass);
+  border: 1px solid var(--color-glass-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.glass-card:hover {
+  border-color: #d6d3d1;
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* WhatsApp Marketing was originally imported from a dark dashboard. Keep the
+   translation scoped so nested widgets and body-level portals inherit the CRM
+   palette without affecting the rest of the app. */
+:where(.wa-light, .wa-light-active) :is(.bg-slate-950, .bg-slate-950\/95, .bg-slate-950\/90, .bg-slate-950\/80, .bg-slate-950\/70, .bg-slate-950\/60, .bg-slate-950\/50, .bg-slate-950\/40, .bg-slate-950\/30, .bg-slate-950\/20, .bg-slate-950\/10,
+  .bg-slate-900, .bg-slate-900\/95, .bg-slate-900\/90, .bg-slate-900\/80, .bg-slate-900\/70, .bg-slate-900\/60, .bg-slate-900\/50, .bg-slate-900\/40, .bg-slate-900\/30, .bg-slate-900\/20, .bg-slate-900\/10,
+  .bg-black, .bg-black\/20) {
+  background-color: var(--color-surface) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-slate-800, .bg-slate-800\/95, .bg-slate-800\/90, .bg-slate-800\/80, .bg-slate-800\/70, .bg-slate-800\/60, .bg-slate-800\/50, .bg-slate-800\/40, .bg-slate-800\/30, .bg-slate-800\/20, .bg-slate-800\/10,
+  .bg-slate-700, .bg-slate-700\/95, .bg-slate-700\/90, .bg-slate-700\/80, .bg-slate-700\/70, .bg-slate-700\/60, .bg-slate-700\/50, .bg-slate-700\/40, .bg-slate-700\/30, .bg-slate-700\/20, .bg-slate-700\/10,
+  .bg-slate-600, .bg-slate-600\/50, .bg-slate-600\/30, .bg-slate-600\/20, .bg-slate-500) {
+  background-color: var(--color-surface-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.hover\:bg-slate-950:hover, .hover\:bg-slate-900:hover, .hover\:bg-slate-900\/80:hover, .hover\:bg-slate-900\/60:hover,
+  .hover\:bg-slate-800:hover, .hover\:bg-slate-800\/80:hover, .hover\:bg-slate-800\/60:hover, .hover\:bg-slate-800\/50:hover,
+  .hover\:bg-slate-700:hover, .hover\:bg-slate-700\/50:hover, .focus\:bg-slate-800:focus, .focus\:bg-slate-700:focus) {
+  background-color: var(--color-surface-hover) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-slate-900, .border-slate-800, .border-slate-800\/80, .border-slate-800\/50,
+  .border-slate-700, .border-slate-700\/80, .border-slate-700\/50, .border-slate-600,
+  .border-slate-600\/30, .border-slate-600\/50, .divide-slate-800, .divide-slate-700,
+  .ring-slate-800, .ring-slate-700) {
+  border-color: var(--color-border) !important;
+  --tw-divide-opacity: 1 !important;
+  --tw-ring-color: var(--color-border) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-white, .text-white\/90, .text-slate-100, .text-slate-100\/90,
+  .text-slate-200, .text-slate-200\/90, .text-slate-200\/80,
+  .text-slate-300, .text-slate-300\/90, .text-slate-300\/80) {
+  color: var(--color-foreground) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-white\/70, .text-white\/60, .text-white\/50, .text-slate-400, .text-slate-400\/90,
+  .text-slate-400\/80, .text-slate-500, .text-slate-500\/90, .text-slate-500\/80,
+  .text-slate-600, .text-slate-600\/90, .text-slate-600\/80) {
+  color: var(--color-muted) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-violet-600, .bg-violet-500) {
+  background-color: var(--color-accent) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.hover\:bg-violet-700:hover, .hover\:bg-violet-600:hover, .hover\:bg-violet-500:hover) {
+  background-color: var(--color-accent-hover) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-violet-300, .text-violet-400, .text-violet-500, .text-violet-600) {
+  color: var(--color-accent) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-violet-500, .border-violet-500\/30, .border-violet-500\/40, .border-violet-500\/50, .border-violet-600\/30) {
+  border-color: rgba(180, 83, 9, 0.35) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-violet-500\/10, .bg-violet-500\/15, .bg-violet-500\/20, .bg-violet-600\/20) {
+  background-color: var(--color-accent-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-blue-300, .text-blue-400, .text-blue-500, .text-blue-600) {
+  color: var(--color-info) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-blue-500, .bg-blue-600) {
+  background-color: var(--color-info) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-blue-500\/10, .bg-blue-600\/20) {
+  background-color: var(--color-info-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-blue-500\/20, .border-blue-600\/30) {
+  border-color: rgba(29, 78, 216, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-amber-100\/80, .text-amber-200, .text-amber-300, .text-amber-400, .text-amber-600, .text-yellow-400, .text-orange-400) {
+  color: var(--color-warning) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-amber-500\/5, .bg-amber-500\/10, .bg-amber-950\/40, .bg-yellow-600\/20, .bg-orange-500\/10) {
+  background-color: var(--color-warning-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-amber-500\/20, .border-amber-500\/30, .border-amber-600\/40, .border-yellow-600\/30, .border-orange-500\/20) {
+  border-color: rgba(161, 98, 7, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-red-300, .text-red-400, .text-red-500) {
+  color: var(--color-danger) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-red-500\/5, .bg-red-500\/10, .bg-red-500\/15, .bg-red-600\/20, .hover\:bg-red-950\/30:hover, .hover\:bg-red-950\/40:hover) {
+  background-color: var(--color-danger-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-red-500\/30, .border-red-600\/30, .border-red-900) {
+  border-color: rgba(185, 28, 28, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-red-600, .hover\:bg-red-700:hover) {
+  background-color: var(--color-danger) !important;
+  color: #ffffff !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-amber-600, .hover\:bg-amber-700:hover, .bg-yellow-400) {
+  background-color: var(--color-warning) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-purple-500\/10, .bg-purple-600\/20) {
+  background-color: var(--color-purple-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-purple-400, .text-purple-600) {
+  color: var(--color-purple) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-purple-500\/20, .border-purple-600\/30) {
+  border-color: rgba(109, 40, 217, 0.25) !important;
+}
+
+.wa-light-active .bg-sidebar :is(.text-white, .text-white\/90) {
+  color: #ffffff !important;
+}
+
+.wa-light-active .bg-sidebar .text-white\/80 {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.wa-light-active .bg-sidebar .text-white\/70 {
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.wa-light-active .bg-sidebar .text-white\/50 {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+.wa-light-active .bg-sidebar .text-white\/40 {
+  color: rgba(255, 255, 255, 0.4) !important;
+}
+
+
+
+/* Status badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Table styles */
+.crm-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.crm-table thead th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-light);
+}
+
+.crm-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.78rem;
+  transition: background 0.15s;
+}
+
+.crm-table tbody tr:hover td {
+  background: var(--color-surface-hover);
+}
+
+/* Form controls — no padding here, Tailwind classes handle it per-component */
+select {
+  appearance: none;
+  background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 32px 8px 12px;
+  font-size: 0.78rem;
+}
+
+input,
+textarea {
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  transition: border-color 0.15s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-light);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #a8a29e;
+}
+
+/* Hide native number input spinners — app uses custom +/- controls */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+::selection {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+/* Hide scrollbar utility */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Table styles */
+.crm-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.crm-table thead th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-light);
+}
+
+.crm-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.78rem;
+  transition: background 0.15s;
+}
+
+.crm-table tbody tr:hover td {
+  background: var(--color-surface-hover);
+}
+
+/* Form controls — no padding here, Tailwind classes handle it per-component */
+select {
+  appearance: none;
+  background: var(--color-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 8px 32px 8px 12px;
+  font-size: 0.78rem;
+}
+
+input,
+textarea {
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 0.78rem;
+  transition: border-color 0.15s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-light);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #a8a29e;
+}
+
+/* Hide native number input spinners — app uses custom +/- controls */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+::selection {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+/* Hide scrollbar utility */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Mobile table wrapper */
+@media (max-width: 767px) {
+  .crm-table thead th {
+    font-size: 0.62rem;
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+
+  .crm-table tbody td {
+    padding: 10px;
+    font-size: 0.72rem;
+  }
+}
+
+/* ── Mobile stat card compact ───────────────────────────────── */
+@media (max-width: 767px) {
+  .glass-card {
+    border-radius: 14px;
+  }
+}
+
+/* ── Mobile top safe-area clearance (TopBar) ────────────────── */
+.mobile-top-safe {
+  /* Robust fallback: guarantees at least 32px clearance for Android status bars */
+  padding-top: max(env(safe-area-inset-top), 32px);
+  height: calc(56px + max(env(safe-area-inset-top), 32px));
+}
+
+@media (min-width: 768px) {
+  .mobile-top-safe {
+    padding-top: 0 !important;
+    height: 64px !important;
+  }
+}
+
+/* ── Touch target minimum (WCAG 2.5.5) ─────────────────────── */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* ── Slide-up animation (shared / used by BottomNav drawer) ── */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up-sheet {
+  animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ── Smooth tap feedback for links/buttons on iOS ───────────── */
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Homzentic palette — Tiles & Sanitary vertical (BUSINESS_TYPE=tiles)
+   Scoped overrides applied only when <html data-brand="homzentic">.
+   The furniture @theme inline token values above are NEVER modified;
+   this block redefines the same --color-* custom properties so they
+   cascade to every Tailwind utility and component at runtime.
+
+   Light-only, premium cool palette (no dark-mode scheme). Every
+   --color-* token the furniture palette defines is given a value here
+   so no token is undefined under the homzentic brand attribute.
+   Foreground/background pairings are chosen to meet WCAG AA contrast
+   (4.5:1 normal text, 3:1 large text / control boundaries / focus).
+   ───────────────────────────────────────────────────────────── */
+[data-brand="homzentic"] {
+  /* ── Homzentic DARK theme (default) ──
+     NeuroBank-inspired: near-black blue canvas, dark cards, royal-blue
+     accent, light text. Light variant applies under data-theme="light". */
+  --color-background: #070a12;
+  --color-foreground: #e8edf6;
+  --color-surface: #0e131e;
+  --color-surface-hover: #161d2b;
+  --color-surface-light: #121826;
+  --color-card: #0e131e;
+  --color-card-foreground: #e8edf6;
+  --color-popover: #0e131e;
+  --color-popover-foreground: #e8edf6;
+
+  --color-primary: #3b6bff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #161d2b;
+  --color-secondary-foreground: #e8edf6;
+  --color-input: #1b2433;
+  --color-ring: rgba(59, 107, 255, 0.50);
+  --color-destructive: #f87171;
+  --color-border: #1e2735;
+  --color-border-light: #283447;
+  --color-muted: #8893a7;
+  --color-muted-foreground: #8893a7;
+  --color-accent: #3b6bff;
+  --color-accent-foreground: #ffffff;
+  --color-accent-hover: #5680ff;
+  --color-accent-light: rgba(59, 107, 255, 0.16);
+
+  --color-teal: #2dd4bf;
+  --color-teal-light: rgba(45, 212, 191, 0.14);
+
+  --color-success: #34d399;
+  --color-success-light: rgba(52, 211, 153, 0.14);
+  --color-danger: #f87171;
+  --color-danger-light: rgba(248, 113, 113, 0.14);
+  --color-warning: #fbbf24;
+  --color-warning-light: rgba(251, 191, 36, 0.14);
+  --color-info: #60a5fa;
+  --color-info-light: rgba(96, 165, 250, 0.14);
+  --color-purple: #a78bfa;
+  --color-purple-light: rgba(167, 139, 250, 0.14);
+  --color-pink: #f472b6;
+  --color-pink-light: rgba(244, 114, 182, 0.14);
+
+  --color-glass: #0e131e;
+  --color-glass-border: #1e2735;
+  --color-sidebar: #0a0e17;
+  --color-sidebar-active: rgba(59, 107, 255, 0.20);
+}
+
+/* ── Homzentic LIGHT theme (data-theme="light") ──
+   White-blue: airy off-white canvas, white cards, royal-blue accent,
+   dark ink. Sidebar stays dark for premium contrast. */
+[data-brand="homzentic"][data-theme="light"] {
+  --color-background: #eef2fb;
+  --color-foreground: #0b1220;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f6fd;
+  --color-surface-light: #eef2fb;
+  --color-card: #ffffff;
+  --color-card-foreground: #0b1220;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #0b1220;
+
+  --color-primary: #3b6bff;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef2fb;
+  --color-secondary-foreground: #0b1220;
+  --color-input: #e2e8f3;
+  --color-ring: rgba(59, 107, 255, 0.40);
+  --color-destructive: #dc2626;
+  --color-border: #e2e8f3;
+  --color-border-light: #cdd6e6;
+  --color-muted: #5b6677;
+  --color-muted-foreground: #5b6677;
+  --color-accent: #2f57e0;
+  --color-accent-foreground: #ffffff;
+  --color-accent-hover: #2545bd;
+  --color-accent-light: rgba(59, 107, 255, 0.10);
+
+  --color-teal: #0d9488;
+  --color-teal-light: rgba(13, 148, 136, 0.10);
+
+  --color-success: #16834a;
+  --color-success-light: rgba(22, 131, 74, 0.10);
+  --color-danger: #dc2626;
+  --color-danger-light: rgba(220, 38, 38, 0.10);
+  --color-warning: #d97706;
+  --color-warning-light: rgba(217, 119, 6, 0.10);
+  --color-info: #2563eb;
+  --color-info-light: rgba(37, 99, 235, 0.10);
+  --color-purple: #7c3aed;
+  --color-purple-light: rgba(124, 58, 237, 0.10);
+  --color-pink: #db2777;
+  --color-pink-light: rgba(219, 39, 119, 0.10);
+
+  --color-glass: #ffffff;
+  --color-glass-border: #e2e8f3;
+  --color-sidebar: #0a0e17;
+  --color-sidebar-active: rgba(59, 107, 255, 0.20);
+}
+
+/* Readable-accent remaps (Homzentic only).
+   Lime works as a fill but not as text or behind white text, so:
+   - accent TEXT/icons/links use a dark, on-brand green;
+   - lime FILLS (.bg-accent, often paired with hardcoded text-white in markup)
+     get forced dark text via higher-specificity rules so labels stay legible. */
+[data-brand="homzentic"] .text-accent {
+  color: var(--color-accent);
+}
+
+[data-brand="homzentic"] .hover\:text-accent:hover,
+[data-brand="homzentic"] .hover\:text-accent-hover:hover {
+  color: var(--color-accent-hover);
+}
+
+[data-brand="homzentic"] .border-accent {
+  border-color: var(--color-accent);
+}
+
+[data-brand="homzentic"] .bg-accent {
+  color: var(--color-accent-foreground);
+}
+
+[data-brand="homzentic"] .bg-accent.text-white,
+[data-brand="homzentic"] .bg-accent .text-white {
+  color: var(--color-accent-foreground);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Homzentic modern surfaces (scoped to [data-brand="homzentic"]).
+   These upgrade the shared `.glass-card` and `.stat-card` to a
+   modern, Aceternity/Magic-UI-style look (gradient surface, layered
+   shadow, hover lift, cursor-following spotlight glow, gradient top
+   accent). Scoped to homzentic ONLY, so the furniture vertical keeps
+   its original flat cards unchanged. All colors derive from --color-*
+   tokens. Motion is suppressed under prefers-reduced-motion. */
+[data-brand="homzentic"] .glass-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 14px 34px -20px rgba(0, 0, 0, 0.25);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+[data-brand="homzentic"] .glass-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in oklch, var(--color-accent) 55%, var(--color-border));
+  /* Accent-tinted glow so the lift is clearly visible on the dark canvas
+     (and reads as a soft blue shadow in light mode too). */
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent),
+    0 8px 20px -6px color-mix(in oklch, var(--color-accent) 35%, transparent),
+    0 22px 48px -18px color-mix(in oklch, var(--color-accent) 28%, transparent);
+}
+
+[data-brand="homzentic"] .stat-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Cursor-following spotlight (coords set by the StatCard component) */
+[data-brand="homzentic"] .stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--spotlight-opacity, 0);
+  transition: opacity 0.3s ease;
+  background: radial-gradient(240px circle at var(--spotlight-x, 50%) var(--spotlight-y, 0%),
+      color-mix(in oklch, var(--color-accent) 32%, transparent),
+      transparent 60%);
+}
+
+[data-brand="homzentic"] .stat-card:hover::before {
+  opacity: 1;
+}
+
+/* Gradient top accent line that reveals on hover */
+[data-brand="homzentic"] .stat-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+}
+
+[data-brand="homzentic"] .stat-card:hover::after {
+  opacity: 0.9;
+}
+
+/* Keep card content above the spotlight layer */
+[data-brand="homzentic"] .stat-card>* {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  [data-brand="homzentic"] .glass-card,
+  [data-brand="homzentic"] .stat-card::before,
+  [data-brand="homzentic"] .stat-card::after {
+    transition: none;
+  }
+
+  [data-brand="homzentic"] .glass-card:hover {
+    transform: none;
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   Vendored modern component animations (additive, brand-agnostic)
+   ─────────────────────────────────────────────────────────────
+   Pure-CSS keyframes used by vendored modern components
+   (components/ui/shimmer-button.tsx and similar). These add no new
+   --color-* tokens and are not referenced by any furniture-vertical
+   component, so the furniture experience is unchanged. Colors are
+   supplied at the component level via --color-* design tokens, so the
+   effects inherit the Active_Vertical palette. No JS animation runtime
+   is required. All effects are suppressed under prefers-reduced-motion
+   at the component level. */
+@keyframes shimmer-slide {
+  0% {
+    background-position: -150% 0;
+  }
+
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+.animate-shimmer-slide {
+  background-size: 200% 100%;
+  animation: shimmer-slide 2.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-shimmer-slide {
+    animation: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Inventory — larger, comfortable form controls on mobile only.
+   Scoped to the Add Product/Raw Material sheet so the desktop
+   layout is untouched. font-size: 16px prevents iOS zoom-on-focus.
+   ───────────────────────────────────────────────────────────── */
+@media (max-width: 767px) {
+
+  #add-product-form input,
+  #add-product-form select,
+  #add-product-form textarea {
+    font-size: 1rem;
+    padding: 0.75rem 0.875rem;
+    border-radius: 0.75rem;
+    min-height: 48px;
+  }
+
+  #add-product-form select {
+    padding-right: 2.25rem;
+    background-position: right 0.875rem center;
+  }
+
+  #add-product-form textarea {
+    min-height: 96px;
+  }
+}

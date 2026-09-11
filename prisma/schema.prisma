@@ -1,0 +1,94 @@
+generator client {
+  provider      = "prisma-client-js"
+  runtime       = "nodejs"
+  output        = "../node_modules/.prisma/client"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "debian-openssl-1.1.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Contact {
+  id           Int           @id @default(autoincrement())
+  name         String
+  phone        String        @unique
+  email        String?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  appointments Appointment[]
+  callLogs     CallLog[]
+}
+
+model Appointment {
+  id        Int      @id @default(autoincrement())
+  contactId Int
+  contact   Contact  @relation(fields: [contactId], references: [id])
+  date      DateTime
+  time      String
+  purpose   String
+  status    String   @default("Scheduled")
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([status])
+  @@unique([date, time])
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  QUEUED
+  IN_PROGRESS
+  FAILED
+  COMPLETED
+  MISSED
+  NO_ANSWER
+  BUSY
+}
+
+model CallLog {
+  id            Int            @id @default(autoincrement())
+  contactId     Int?
+  contact       Contact?       @relation(fields: [contactId], references: [id])
+  customerName  String
+  phone         String
+  direction     CallDirection
+  status        CallStatus
+  duration      String?
+  durationSec   Int            @default(0)
+  agent         String         @default("AI Agent")
+  date          DateTime
+  time          String
+  purpose       String?
+  outcome       String?
+  notes         String?
+  recording     Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  livekitRoomId String?        @unique
+  dograhRunId   String?        @unique
+  recordingUrl  String?
+  transcriptUrl String?
+  callType      String?        @default("manual")
+  aiHandled     Boolean        @default(false)
+  transcript    CallTranscript?
+
+  @@index([date])
+  @@index([contactId])
+}
+
+model CallTranscript {
+  id        Int     @id @default(autoincrement())
+  callLogId Int     @unique
+  callLog   CallLog @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+  summary   String?
+  sentiment String?
+  messages  Json
+}
