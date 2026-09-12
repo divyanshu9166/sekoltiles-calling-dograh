@@ -122,6 +122,60 @@ const inboundAppointmentUuid = await upsertTool({
   },
 })
 
+const commonCallbackParameters = [
+  stringParameter('preferredTime', 'Customer-confirmed callback time or time window in India time.'),
+  stringParameter('reason', 'Short reason the customer wants a human team member to call back.'),
+]
+
+const outboundCallbackUuid = await upsertTool({
+  name: 'request_outbound_human_callback',
+  description: 'Schedule a human-team callback during an outbound call. Customer name, phone and region come from trusted CRM context; never ask for the known name or phone.',
+  category: 'http_api',
+  icon: 'phone-forwarded',
+  icon_color: '#2563EB',
+  definition: {
+    schema_version: 1,
+    type: 'http_api',
+    config: {
+      method: 'POST',
+      url: `${crmPublicUrl}/api/calls/schedule-callback`,
+      credential_uuid: credentialUuid,
+      parameters: commonCallbackParameters,
+      preset_parameters: [
+        { name: 'customerName', type: 'string', value_template: '{{initial_context.customer_name}}', required: true },
+        { name: 'phone', type: 'string', value_template: '{{initial_context.phone_number}}', required: true },
+        { name: 'region', type: 'string', value_template: '{{initial_context.region}}', required: false },
+      ],
+      timeout_ms: 10_000,
+    },
+  },
+})
+
+const inboundCallbackUuid = await upsertTool({
+  name: 'request_inbound_human_callback',
+  description: 'Schedule a human-team callback for an inbound caller. The caller phone is supplied automatically; collect only their name, preferred time and reason.',
+  category: 'http_api',
+  icon: 'phone-forwarded',
+  icon_color: '#7C3AED',
+  definition: {
+    schema_version: 1,
+    type: 'http_api',
+    config: {
+      method: 'POST',
+      url: `${crmPublicUrl}/api/calls/schedule-callback`,
+      credential_uuid: credentialUuid,
+      parameters: [
+        stringParameter('customerName', 'Customer full name stated by the inbound caller.'),
+        ...commonCallbackParameters,
+      ],
+      preset_parameters: [
+        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: true },
+      ],
+      timeout_ms: 10_000,
+    },
+  },
+})
+
 const endCallUuid = await upsertTool({
   name: 'end_call',
   description: 'End the telephone call immediately when the purpose is complete, the customer declines, asks to disconnect, or says goodbye. Do not keep talking after using it.',
@@ -160,7 +214,13 @@ const definition = {
         add_global_prompt: false,
         delayed_start: false,
         extraction_enabled: false,
-        tool_uuids: [outboundAppointmentUuid, inboundAppointmentUuid, endCallUuid],
+        tool_uuids: [
+          outboundAppointmentUuid,
+          inboundAppointmentUuid,
+          outboundCallbackUuid,
+          inboundCallbackUuid,
+          endCallUuid,
+        ],
         is_start: true,
       },
     },
@@ -212,5 +272,5 @@ if (validation.valid === false || validation.is_valid === false) {
 await api(`/workflow/${workflow.id}/publish`, { method: 'POST' })
 
 console.log(`Published Sekol Tiles workflow ${workflowUuid}.`)
-console.log('Attached: outbound appointment, inbound appointment, end-call, and CRM transcript webhook.')
+console.log('Attached: outbound/inbound appointments, outbound/inbound human callbacks, end-call, and CRM transcript webhook.')
 console.log('Existing Dograh Groq, STT, TTS and telephony model selections were preserved.')

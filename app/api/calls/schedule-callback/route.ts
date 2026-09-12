@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { customerName, phone, preferredTime, reason } = await req.json()
+    const { customerName, phone, preferredTime, reason, region } = await req.json()
     if (
       typeof customerName !== 'string' || !customerName.trim() ||
       typeof phone !== 'string' || !/^\+[1-9]\d{7,14}$/.test(phone.replace(/[\s().-]/g, '')) ||
@@ -41,10 +41,11 @@ export async function POST(req: NextRequest) {
         date: now,
         time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
         purpose: `Callback requested: ${reason || 'General'}`,
+        region: typeof region === 'string' && region.trim() ? region.trim().slice(0, 120) : null,
         outcome: 'Callback Scheduled',
         notes: `Customer requested callback at ${preferredTime.trim().slice(0, 200)}. Reason: ${typeof reason === 'string' ? reason.slice(0, 500) : 'General'}`,
         recording: false,
-        callType: 'ai_inbound',
+        callType: 'callback_request',
         aiHandled: true,
       },
     })
