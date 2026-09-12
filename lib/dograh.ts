@@ -73,6 +73,7 @@ export async function triggerDograhCall(
   const workflowUuid = required('DOGRAH_WORKFLOW_UUID', env)
   const telephonyConfigurationId = optionalInteger('DOGRAH_TELEPHONY_CONFIGURATION_ID', env)
   const fromPhoneNumberId = optionalInteger('DOGRAH_FROM_PHONE_NUMBER_ID', env)
+  const greeting = `नमस्ते ${input.customerName || 'ग्राहक'} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
 
   return dograhRequest<DograhCallResponse>(
     `/public/agent/workflow/${encodeURIComponent(workflowUuid)}`,
@@ -86,7 +87,12 @@ export async function triggerDograhCall(
           called_number: input.phoneNumber,
           reason: input.reason,
           crm_call_log_id: input.crmCallLogId,
-          call_greeting: `नमस्ते ${input.customerName || 'ग्राहक'} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`,
+          // Dograh uses this reserved context key to speak a deterministic
+          // opening through TTS instead of asking the LLM for a system-only
+          // first turn (which Groq Qwen correctly rejects).
+          greeting_override: { type: 'text', text: greeting },
+          // Keep the plain value available to workflow prompt templates.
+          call_greeting: greeting,
           source: 'sekol-calling-crm',
         },
         ...(telephonyConfigurationId ? { telephony_configuration_id: telephonyConfigurationId } : {}),
