@@ -6,6 +6,8 @@ const workflowUuid = process.env.DOGRAH_WORKFLOW_UUID?.trim()
 const crmSecret = process.env.CRM_API_SECRET?.trim()
 const crmPublicUrl = (process.env.CRM_PUBLIC_URL || '').trim().replace(/\/+$/, '')
 const explicitHandoffNumber = process.env.CALL_TRANSFER_NUMBER?.trim()
+const isAriTelephony = process.env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() === 'ari'
+const ariTrunkEndpoint = process.env.DOGRAH_ARI_TRUNK_ENDPOINT?.trim()
 
 for (const [name, value] of Object.entries({
   DOGRAH_API_URL: rawBase,
@@ -207,6 +209,34 @@ const humanHandoffNumber = (explicitHandoffNumber || promptHandoffNumber || DEFA
 if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
   throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
 }
+if (isAriTelephony && !ariTrunkEndpoint) {
+  throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT is required when DOGRAH_TELEPHONY_PROVIDER=ari')
+}
+if (ariTrunkEndpoint && !/^[A-Za-z0-9_.-]+$/.test(ariTrunkEndpoint)) {
+  throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT is invalid')
+}
+
+const liveTransferUuid = isAriTelephony
+  ? await upsertTool({
+      name: 'transfer_to_human',
+      description: 'Immediately bridge a caller to the configured Sekol human team member after an explicit human-agent or call-transfer request.',
+      category: 'transfer_call',
+      icon: 'phone-forwarded',
+      icon_color: '#2563EB',
+      definition: {
+        schema_version: 1,
+        type: 'transfer_call',
+        config: {
+          destination_source: 'static',
+          destination: `PJSIP/${humanHandoffNumber}@${ariTrunkEndpoint}`,
+          messageType: 'custom',
+          customMessage: 'एक क्षण, मैं आपको हमारी टीम से जोड़ रही हूँ।',
+          timeout: 30,
+          call_disposition: 'transferred_to_human',
+        },
+      },
+    })
+  : null
 const definition = {
   nodes: [
     {
@@ -215,7 +245,7 @@ const definition = {
       position: { x: 160, y: 100 },
       data: {
         name: 'Sekol Tiles - Anushka',
-        prompt: buildSekolDograhPrompt(humanHandoffNumber),
+        prompt: buildSekolDograhPrompt(humanHandoffNumber, { liveTransferEnabled: isAriTelephony }),
         greeting_type: 'text',
         greeting: 'नमस्ते! Sekol Tiles में आपका स्वागत है, मैं अनुष्का AI सहायक बोल रही हूँ। कैसे मदद करूँ?',
         allow_interrupt: true,
@@ -227,6 +257,7 @@ const definition = {
           inboundAppointmentUuid,
           outboundCallbackUuid,
           inboundCallbackUuid,
+          ...(liveTransferUuid ? [liveTransferUuid] : []),
           endCallUuid,
         ],
         is_start: true,
@@ -280,5 +311,5 @@ if (validation.valid === false || validation.is_valid === false) {
 await api(`/workflow/${workflow.id}/publish`, { method: 'POST' })
 
 console.log(`Published Sekol Tiles workflow ${workflowUuid}.`)
-console.log('Attached: outbound/inbound appointments, outbound/inbound human callbacks, end-call, and CRM transcript webhook.')
+console.log(`Attached: outbound/inbound appointments, callbacks, ${liveTransferUuid ? 'live transfer, ' : ''}end-call, and CRM transcript webhook.`)
 console.log('Existing Dograh Groq, STT, TTS and telephony model selections were preserved.')

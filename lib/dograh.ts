@@ -82,6 +82,10 @@ export function dograhOutboundDialTarget(
   return `PJSIP/${phoneNumber}@${trunkEndpoint}`
 }
 
+export function dograhUsesAri(env: DograhEnvironment = process.env) {
+  return env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() === 'ari'
+}
+
 async function dograhRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -212,6 +216,59 @@ type DograhWorkflow = {
   }
   template_context_variables?: Record<string, unknown>
   workflow_configurations?: Record<string, unknown>
+}
+
+type DograhTool = {
+  tool_uuid: string
+  name: string
+  status?: string
+}
+
+export async function updateDograhHumanTransferDestination(
+  transferPhone: string,
+  env: DograhEnvironment = process.env,
+  request: typeof fetch = fetch,
+) {
+  if (!dograhUsesAri(env)) return
+
+  const trunkEndpoint = required('DOGRAH_ARI_TRUNK_ENDPOINT', env)
+  if (!/^[A-Za-z0-9_.-]+$/.test(trunkEndpoint)) {
+    throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT may contain only letters, numbers, dots, underscores, and hyphens')
+  }
+
+  const tools = await dograhRequest<DograhTool[]>('/tools/', {}, env, request)
+  const existing = tools.find(tool => tool.name === 'transfer_to_human' && tool.status !== 'archived')
+  if (!existing) {
+    throw new Error('Dograh live-transfer tool is missing. Run npm run dograh:sync after configuring Asterisk ARI.')
+  }
+
+  await dograhRequest(
+    `/tools/${existing.tool_uuid}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: 'transfer_to_human',
+        description: 'Immediately bridge a caller to the configured Sekol human team member after an explicit human-agent or call-transfer request.',
+        icon: 'phone-forwarded',
+        icon_color: '#2563EB',
+        status: 'active',
+        definition: {
+          schema_version: 1,
+          type: 'transfer_call',
+          config: {
+            destination_source: 'static',
+            destination: `PJSIP/${transferPhone}@${trunkEndpoint}`,
+            messageType: 'custom',
+            customMessage: 'एक क्षण, मैं आपको हमारी टीम से जोड़ रही हूँ।',
+            timeout: 30,
+            call_disposition: 'transferred_to_human',
+          },
+        },
+      }),
+    },
+    env,
+    request,
+  )
 }
 
 export async function updateDograhAgentPrompt(

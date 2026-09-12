@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentAdmin } from '@/lib/auth'
 import { buildSekolDograhPrompt } from '@/lib/calling-agent/prompt.mjs'
-import { updateDograhAgentPrompt } from '@/lib/dograh'
+import { dograhUsesAri, updateDograhAgentPrompt, updateDograhHumanTransferDestination } from '@/lib/dograh'
 import { prisma } from '@/lib/db'
 
 function normalizeE164(value: unknown) {
@@ -34,9 +34,13 @@ export async function PATCH(request: NextRequest) {
       )
     }
 
-    // Publish the new number first so the dashboard never reports success
-    // while the live agent is still using an older handoff destination.
-    await updateDograhAgentPrompt(buildSekolDograhPrompt(transferPhone))
+    const liveTransferEnabled = dograhUsesAri()
+    if (liveTransferEnabled) {
+      await updateDograhHumanTransferDestination(transferPhone)
+    }
+    // Publish after the transfer destination, so a successful dashboard update
+    // always leaves the agent prompt and live handoff routing in sync.
+    await updateDograhAgentPrompt(buildSekolDograhPrompt(transferPhone, { liveTransferEnabled }))
     await prisma.adminUser.update({ where: { id: user.id }, data: { transferPhone } })
 
     return NextResponse.json({ success: true, settings: { transferPhone } })
