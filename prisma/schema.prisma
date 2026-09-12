@@ -98,6 +98,7 @@ model AdminUser {
   id           Int            @id @default(autoincrement())
   username     String         @unique
   passwordHash String
+  transferPhone String        @default("+919726418181")
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
   sessions     AdminSession[]

@@ -175,3 +175,56 @@ export async function getDograhRun(
   const workflowId = await dograhWorkflowId(env, request)
   return dograhRequest<DograhWorkflowRun>(`/workflow/${workflowId}/runs/${runId}`, {}, env, request)
 }
+
+type DograhWorkflow = {
+  name?: string
+  workflow_definition: {
+    nodes?: Array<{ type?: string; data?: Record<string, unknown> }>
+    [key: string]: unknown
+  }
+  template_context_variables?: Record<string, unknown>
+  workflow_configurations?: Record<string, unknown>
+}
+
+export async function updateDograhAgentPrompt(
+  prompt: string,
+  env: DograhEnvironment = process.env,
+  request: typeof fetch = fetch,
+) {
+  const workflowId = await dograhWorkflowId(env, request)
+  const current = await dograhRequest<DograhWorkflow>(`/workflow/fetch/${workflowId}`, {}, env, request)
+  const nodes = current.workflow_definition?.nodes || []
+  const startNode = nodes.find(node => node.type === 'startCall')
+  if (!startNode?.data) throw new Error('Dograh start-call node was not found')
+
+  const workflowDefinition = {
+    ...current.workflow_definition,
+    nodes: nodes.map(node => node === startNode ? { ...node, data: { ...node.data, prompt } } : node),
+  }
+
+  await dograhRequest(
+    `/workflow/${workflowId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: current.name || 'Sekol Tiles - Anushka',
+        workflow_definition: workflowDefinition,
+        template_context_variables: current.template_context_variables || {},
+        workflow_configurations: current.workflow_configurations || {},
+      }),
+    },
+    env,
+    request,
+  )
+
+  const validation = await dograhRequest<{ valid?: boolean; is_valid?: boolean; errors?: unknown }>(
+    `/workflow/${workflowId}/validate`,
+    { method: 'POST' },
+    env,
+    request,
+  )
+  if (validation.valid === false || validation.is_valid === false) {
+    throw new Error(`Dograh workflow validation failed: ${JSON.stringify(validation.errors || validation)}`)
+  }
+  await dograhRequest(`/workflow/${workflowId}/publish`, { method: 'POST' }, env, request)
+}

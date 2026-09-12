@@ -33,6 +33,7 @@ import {
   X,
   Bot,
   PhoneCall,
+  PhoneForwarded,
   Mic,
   MicOff,
   Wifi,
@@ -84,6 +85,10 @@ export default function CallsPage() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState('');
   const [settingsError, setSettingsError] = useState('');
+  const [callHandlingForm, setCallHandlingForm] = useState({ transferPhone: '' });
+  const [callHandlingLoading, setCallHandlingLoading] = useState(false);
+  const [callHandlingMessage, setCallHandlingMessage] = useState('');
+  const [callHandlingError, setCallHandlingError] = useState('');
 
   // AI Caller state
   const [agentStatus, setAgentStatus] = useState(null);
@@ -167,6 +172,22 @@ export default function CallsPage() {
         }
       })
       .catch(() => setSettingsError('Could not load account settings.'));
+    setCallHandlingError('');
+    setCallHandlingMessage('');
+    fetch('/api/settings/call-handling', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (response.status === 401) {
+          window.location.replace('/auth/login');
+          return;
+        }
+        if (response.ok && result.settings) {
+          setCallHandlingForm({ transferPhone: result.settings.transferPhone || '' });
+          return;
+        }
+        setCallHandlingError(result.error || 'Could not load call handling settings.');
+      })
+      .catch(() => setCallHandlingError('Could not load call handling settings.'));
   }, [activeTab]);
 
   useEffect(() => () => {
@@ -209,6 +230,31 @@ export default function CallsPage() {
       setSettingsError('Unable to reach the server. Try again.');
     } finally {
       setSettingsLoading(false);
+    }
+  }
+
+  async function handleCallHandlingSubmit(event) {
+    event.preventDefault();
+    setCallHandlingLoading(true);
+    setCallHandlingError('');
+    setCallHandlingMessage('');
+    try {
+      const response = await fetch('/api/settings/call-handling', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(callHandlingForm),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setCallHandlingError(result.error || 'Could not update the transfer number.');
+        return;
+      }
+      setCallHandlingForm({ transferPhone: result.settings.transferPhone });
+      setCallHandlingMessage('Transfer number saved and published to the live AI agent.');
+    } catch {
+      setCallHandlingError('Unable to reach the server. Try again.');
+    } finally {
+      setCallHandlingLoading(false);
     }
   }
 
@@ -1030,6 +1076,42 @@ export default function CallsPage() {
 
   const renderSettings = () => (
     <div className="max-w-2xl space-y-5">
+      <div className="glass-card p-5 sm:p-6">
+        <div className="flex items-start gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
+            <PhoneForwarded className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Call transfer settings</h2>
+            <p className="text-sm text-muted mt-1">Choose the human-team number Anushka provides when immediate assistance is requested.</p>
+          </div>
+        </div>
+        <form onSubmit={handleCallHandlingSubmit} className="space-y-4">
+          <label className="block">
+            <span className="block text-sm font-medium text-foreground mb-1.5">Transfer / human handoff number</span>
+            <input
+              type="tel"
+              value={callHandlingForm.transferPhone}
+              onChange={(event) => setCallHandlingForm({ transferPhone: event.target.value })}
+              autoComplete="tel"
+              inputMode="tel"
+              placeholder="+919726418181"
+              required
+              className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent"
+            />
+            <span className="block text-xs text-muted mt-1.5">Use international E.164 format, including the country code.</span>
+          </label>
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
+            Vobiz currently uses this for immediate human contact and callback handoff. A bridged live transfer requires an Asterisk ARI or another Dograh-supported transfer connection.
+          </div>
+          {callHandlingError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{callHandlingError}</p>}
+          {callHandlingMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{callHandlingMessage}</p>}
+          <button type="submit" disabled={callHandlingLoading} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60 flex items-center gap-2">
+            {callHandlingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {callHandlingLoading ? 'Publishing…' : 'Save transfer number'}
+          </button>
+        </form>
+      </div>
       <div className="glass-card p-5 sm:p-6">
         <div className="flex items-start gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">

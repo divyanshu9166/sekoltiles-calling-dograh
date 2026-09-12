@@ -1,10 +1,15 @@
-import { SEKOL_DOGRAH_PROMPT } from '../lib/calling-agent/prompt.mjs'
+import { buildSekolDograhPrompt, DEFAULT_HUMAN_HANDOFF_NUMBER } from '../lib/calling-agent/prompt.mjs'
 
 const rawBase = process.env.DOGRAH_API_URL?.trim().replace(/\/+$/, '')
 const apiKey = process.env.DOGRAH_API_KEY?.trim()
 const workflowUuid = process.env.DOGRAH_WORKFLOW_UUID?.trim()
 const crmSecret = process.env.CRM_API_SECRET?.trim()
 const crmPublicUrl = (process.env.CRM_PUBLIC_URL || '').trim().replace(/\/+$/, '')
+const humanHandoffNumber = (process.env.CALL_TRANSFER_NUMBER || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
+
+if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
+  throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
+}
 
 for (const [name, value] of Object.entries({
   DOGRAH_API_URL: rawBase,
@@ -207,7 +212,7 @@ const definition = {
       position: { x: 160, y: 100 },
       data: {
         name: 'Sekol Tiles - Anushka',
-        prompt: SEKOL_DOGRAH_PROMPT,
+        prompt: buildSekolDograhPrompt(humanHandoffNumber),
         greeting_type: 'text',
         greeting: 'नमस्ते! Sekol Tiles में आपका स्वागत है, मैं अनुष्का AI सहायक बोल रही हूँ। कैसे मदद करूँ?',
         allow_interrupt: true,
