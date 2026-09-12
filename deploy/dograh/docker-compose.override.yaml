@@ -1,0 +1,12 @@
+# Production overrides for the separately installed Dograh Docker stack.
+# Copy this file beside Dograh's docker-compose.yaml on the VPS.
+services:
+  api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - sh
+      - -c
+      - |
+        sed -i 's/GroqLLMSettings(model=model, temperature=0.1)/GroqLLMSettings(model=model, temperature=0.1, max_completion_tokens=512)/' /app/api/services/pipecat/service_factory.py
+        exec ./scripts/start_services_docker.sh

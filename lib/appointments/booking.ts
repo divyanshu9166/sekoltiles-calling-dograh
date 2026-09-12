@@ -1,4 +1,4 @@
-/** Canonical showroom booking rules shared by the AI-agent HTTP routes. */
+/** Canonical showroom booking rules shared by the Dograh HTTP routes. */
 export const APPOINTMENT_TIME_ZONE = 'Asia/Kolkata'
 
 export const APPOINTMENT_SLOTS = [

@@ -72,7 +72,6 @@ model CallLog {
   notes         String?
   recording     Boolean        @default(false)
   createdAt     DateTime       @default(now())
-  livekitRoomId String?        @unique
   dograhRunId   String?        @unique
   recordingUrl  String?
   transcriptUrl String?
