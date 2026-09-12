@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import {
-  normalizeAppointmentDate,
   normalizeAppointmentTime,
   normalizeCustomerPhone,
+  indiaDateString,
+  isSundayAppointmentDate,
+  nextOpenAppointmentDate,
+  resolveAppointmentDate,
   timeToMinutes,
   APPOINTMENT_SLOTS,
 } from '@/lib/appointments/booking'
@@ -21,16 +24,44 @@ export async function POST(req: NextRequest) {
   let bookingDate: string | null = null
   try {
     const body = await req.json()
-    const { customerName, phone, date: rawDate, time: rawTime, purpose, notes, region } = body
+    const { customerName, phone, date: rawDate, spokenDate, time: rawTime, purpose, notes, region } = body
 
     if (typeof customerName !== 'string' || !customerName.trim() || !phone || !rawDate || !rawTime) {
-      return NextResponse.json({ error: 'customerName, phone, date, and time are required' }, { status: 400 })
+      return NextResponse.json({ success: false, error: 'customerName, phone, date, and time are required' })
     }
-    const date = normalizeAppointmentDate(rawDate)
+    const today = indiaDateString()
+    const date = resolveAppointmentDate(rawDate, spokenDate, today)
     const time = normalizeAppointmentTime(rawTime)
     const normalizedPhone = normalizeCustomerPhone(phone)
-    if (!date || !time || !normalizedPhone) {
-      return NextResponse.json({ error: 'Use a valid future date, listed showroom slot, and E.164 phone number.' }, { status: 400 })
+    if (!date) {
+      return NextResponse.json({
+        success: false,
+        code: 'INVALID_DATE',
+        error: 'The date could not be resolved. Ask the customer for the date again, then retry.',
+        currentIndiaDate: today,
+        nextOpenDate: nextOpenAppointmentDate(today),
+      })
+    }
+    if (isSundayAppointmentDate(date)) {
+      return NextResponse.json({
+        success: false,
+        code: 'SUNDAY_CLOSED',
+        error: 'Showroom appointments are not available on Sundays. Offer the next open date.',
+        requestedDate: date,
+        nextOpenDate: nextOpenAppointmentDate(date),
+        availableSlots: APPOINTMENT_SLOTS,
+      })
+    }
+    if (!time) {
+      return NextResponse.json({
+        success: false,
+        code: 'INVALID_TIME',
+        error: 'Ask the customer to choose one of the listed showroom slots.',
+        availableSlots: APPOINTMENT_SLOTS,
+      })
+    }
+    if (!normalizedPhone) {
+      return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'The supplied caller phone is invalid.' })
     }
     bookingDate = date
     const customer = customerName.trim().slice(0, 120)
@@ -111,7 +142,7 @@ function slotTakenResponse(bookedTimes: string[]) {
     const slotMinutes = timeToMinutes(slot)
     return slotMinutes !== null && !bookedMinutes.some((booked) => Math.abs(booked - slotMinutes) < 60)
   }).slice(0, 4)
-  return NextResponse.json({ error: 'That slot was just booked.', available: false, suggestions }, { status: 409 })
+  return NextResponse.json({ success: false, code: 'SLOT_TAKEN', error: 'That slot was just booked.', available: false, suggestions })
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

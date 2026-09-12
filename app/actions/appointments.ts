@@ -7,6 +7,7 @@ import {
   normalizeAppointmentDate,
   normalizeAppointmentTime,
   normalizeCustomerPhone,
+  isSundayAppointmentDate,
   timeToMinutes,
 } from '@/lib/appointments/booking'
 import { getCurrentAdmin } from '@/lib/auth'
@@ -44,6 +45,9 @@ export async function createAppointment(data: unknown) {
   const normalizedPhone = normalizeCustomerPhone(parsed.data.phone)
   if (!normalizedDate || !normalizedTime || !normalizedPhone) {
     return { success: false, error: 'Enter a future date, a listed slot and a valid phone number with country code.' }
+  }
+  if (isSundayAppointmentDate(normalizedDate)) {
+    return { success: false, error: 'Showroom appointments are closed on Sundays. Please choose Monday–Saturday.' }
   }
 
   try {

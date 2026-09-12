@@ -4,6 +4,8 @@ import {
   APPOINTMENT_SLOTS,
   normalizeAppointmentDate,
   normalizeAppointmentTime,
+  isSundayAppointmentDate,
+  nextOpenAppointmentDate,
   timeToMinutes,
 } from '@/lib/appointments/booking'
 
@@ -43,6 +45,15 @@ export async function GET(req: NextRequest) {
   // Parse date — accept YYYY-MM-DD
   const date = normalizeAppointmentDate(dateStr)
   if (!date) return NextResponse.json({ error: 'Use a real current or future date in YYYY-MM-DD format.' }, { status: 400 })
+  if (isSundayAppointmentDate(date)) {
+    return NextResponse.json({
+      available: false,
+      reason: 'SUNDAY_CLOSED',
+      error: 'Showroom appointments are not available on Sundays.',
+      nextOpenDate: nextOpenAppointmentDate(date),
+      suggestions: APPOINTMENT_SLOTS.slice(0, 4),
+    })
+  }
   const time = normalizeAppointmentTime(timeStr)
   if (!time) {
     return NextResponse.json(

@@ -38,6 +38,44 @@ export function normalizeAppointmentDate(value: unknown, today = indiaDateString
   return value
 }
 
+export function addIndiaCalendarDays(date: string, days: number): string {
+  const [year, month, day] = date.split('-').map(Number)
+  const result = new Date(Date.UTC(year, month - 1, day + days))
+  return result.toISOString().slice(0, 10)
+}
+
+export function isSundayAppointmentDate(date: string): boolean {
+  const [year, month, day] = date.split('-').map(Number)
+  return new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 0
+}
+
+export function nextOpenAppointmentDate(date: string): string {
+  let candidate = addIndiaCalendarDays(date, 1)
+  while (isSundayAppointmentDate(candidate)) candidate = addIndiaCalendarDays(candidate, 1)
+  return candidate
+}
+
+/**
+ * Uses the customer's original spoken phrase as the authority for relative
+ * dates. This prevents an LLM from turning “कल 13 तारीख” into a past month.
+ */
+export function resolveAppointmentDate(
+  generatedDate: unknown,
+  spokenDate: unknown,
+  today = indiaDateString(),
+): string | null {
+  if (typeof spokenDate === 'string') {
+    const phrase = spokenDate.trim().toLocaleLowerCase('en-IN')
+    if (phrase.includes('tomorrow') || phrase.includes('कल') || /(^|\s)kal($|\s)/i.test(phrase)) {
+      return addIndiaCalendarDays(today, 1)
+    }
+    if (phrase.includes('today') || phrase.includes('आज') || /(^|\s)aaj($|\s)/i.test(phrase)) {
+      return today
+    }
+  }
+  return normalizeAppointmentDate(generatedDate, today)
+}
+
 /** Returns the fixed slot label; supports 24-hour input from HTML time fields. */
 export function normalizeAppointmentTime(value: unknown): (typeof APPOINTMENT_SLOTS)[number] | null {
   if (typeof value !== 'string') return null

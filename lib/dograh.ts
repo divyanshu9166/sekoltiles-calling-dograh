@@ -1,5 +1,7 @@
 import 'server-only'
 
+import { indiaDateString } from '@/lib/appointments/booking'
+
 type DograhEnvironment = Record<string, string | undefined>
 
 type TriggerCallInput = {
@@ -110,6 +112,7 @@ export async function triggerDograhCall(
           called_number: input.phoneNumber,
           reason: input.reason,
           region: input.region,
+          current_india_date: indiaDateString(),
           crm_call_log_id: input.crmCallLogId,
           // Dograh uses this reserved context key to speak a deterministic
           // opening through TTS instead of asking the LLM for a system-only

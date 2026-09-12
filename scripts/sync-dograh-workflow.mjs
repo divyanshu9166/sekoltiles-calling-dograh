@@ -5,11 +5,7 @@ const apiKey = process.env.DOGRAH_API_KEY?.trim()
 const workflowUuid = process.env.DOGRAH_WORKFLOW_UUID?.trim()
 const crmSecret = process.env.CRM_API_SECRET?.trim()
 const crmPublicUrl = (process.env.CRM_PUBLIC_URL || '').trim().replace(/\/+$/, '')
-const humanHandoffNumber = (process.env.CALL_TRANSFER_NUMBER || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
-
-if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
-  throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
-}
+const explicitHandoffNumber = process.env.CALL_TRANSFER_NUMBER?.trim()
 
 for (const [name, value] of Object.entries({
   DOGRAH_API_URL: rawBase,
@@ -72,7 +68,8 @@ function stringParameter(name, description, required = true) {
 const credentialUuid = await upsertCredential()
 
 const commonAppointmentParameters = [
-  stringParameter('date', 'Confirmed appointment date in YYYY-MM-DD format.'),
+  stringParameter('date', 'Resolved appointment date in YYYY-MM-DD format. Never guess the month or year.'),
+  stringParameter('spokenDate', 'Customer original date words exactly as spoken, such as “कल 13 तारीख” or “Monday 14 September”.'),
   stringParameter('time', 'Confirmed India-time slot: 10:00 AM, 11:00 AM, 12:00 PM, 2:00 PM, 3:00 PM, 4:00 PM, or 5:00 PM.'),
   stringParameter('purpose', 'Short confirmed purpose for the showroom appointment.'),
   stringParameter('notes', 'Optional useful details from the conversation. Do not include invented information.', false),
@@ -204,6 +201,12 @@ const workflow = workflows.find((item) => (item.workflow_uuid || item.uuid) === 
 if (!workflow) throw new Error(`Workflow UUID ${workflowUuid} was not found`)
 
 const current = await api(`/workflow/fetch/${workflow.id}`)
+const existingPrompt = current.workflow_definition?.nodes?.find((node) => node.type === 'startCall')?.data?.prompt || ''
+const promptHandoffNumber = existingPrompt.match(/configured human handoff number\s+(\+[0-9 ()-]{7,})/i)?.[1]
+const humanHandoffNumber = (explicitHandoffNumber || promptHandoffNumber || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
+if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
+  throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
+}
 const definition = {
   nodes: [
     {

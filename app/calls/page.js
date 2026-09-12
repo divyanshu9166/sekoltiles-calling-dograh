@@ -1470,6 +1470,7 @@ export default function CallsPage() {
                   <option value="Quotation follow-up">Quotation follow-up</option>
                   <option value="Feedback collection">Feedback collection</option>
                   <option value="New collection announcement">New collection announcement</option>
+                  <option value="12x18 / 12x24 sales campaign">12x18 / 12x24 sales campaign</option>
                   <option value="Payment reminder">Payment reminder</option>
                   <option value="Order status update">Order status update</option>
                   <option value="Custom reason">Custom reason</option>
@@ -1481,13 +1482,22 @@ export default function CallsPage() {
                   id="ai-outbound-region"
                   name="region"
                   type="text"
-                  placeholder="e.g. Jaipur, Rajasthan or West Zone"
+                  placeholder="e.g. Rajasthan, Odisha, Delhi"
                   value={outboundRegion}
                   maxLength={120}
                   onChange={(e) => setOutboundRegion(e.target.value)}
+                  list="supported-pricing-regions"
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
                 />
-                <p className="mt-1 text-[11px] text-muted">Passed to Anushka as trusted context for region-specific follow-up.</p>
+                <datalist id="supported-pricing-regions">
+                  <option value="Odisha" />
+                  <option value="West Bengal" />
+                  <option value="Rajasthan" />
+                  <option value="Delhi" />
+                  <option value="Punjab" />
+                  <option value="Haryana" />
+                </datalist>
+                <p className="mt-1 text-[11px] text-muted">If supplied, Anushka trusts this region, does not ask again, and uses its verified zone price.</p>
               </div>
               {outboundReason === 'Custom reason' && (
                 <div>
