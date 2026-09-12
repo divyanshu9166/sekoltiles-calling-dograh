@@ -1320,11 +1320,8 @@ export default function CallsPage() {
   );
 
   const renderCampaigns = () => {
-    const leadCounts = (campaignDetail?.leads || []).reduce((counts, lead) => {
-      counts[lead.status] = (counts[lead.status] || 0) + 1;
-      return counts;
-    }, {});
-    const totalLeads = campaignDetail?.leads?.length || 0;
+    const leadCounts = campaignDetail?.counts || {};
+    const totalLeads = Object.values(leadCounts).reduce((sum, value) => sum + value, 0);
     const finishedLeads = (leadCounts.COMPLETED || 0) + (leadCounts.FAILED || 0) + (leadCounts.SKIPPED || 0);
     const progress = totalLeads ? Math.round((finishedLeads / totalLeads) * 100) : 0;
     const statusClass = (status) => ({
@@ -1517,6 +1514,9 @@ export default function CallsPage() {
                     </tbody>
                   </table>
                 </div>
+                {totalLeads > (campaignDetail.leads?.length || 0) && (
+                  <p className="text-xs text-muted">Showing the first {campaignDetail.leads.length} contacts. Progress and calling include all {totalLeads} imported contacts.</p>
+                )}
               </div>
             )}
           </div>

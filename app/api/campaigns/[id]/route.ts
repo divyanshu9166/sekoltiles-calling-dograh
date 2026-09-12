@@ -14,12 +14,14 @@ export async function GET(_request: NextRequest, context: CampaignRouteContext) 
   const id = campaignId((await context.params).id)
   if (!id) return NextResponse.json({ success: false, error: 'Invalid campaign.' }, { status: 400 })
 
-  const campaign = await prisma.marketingCampaign.findUnique({
-    where: { id },
-    include: { leads: { orderBy: { id: 'asc' } } },
-  })
+  const [campaign, leads, groupedCounts] = await Promise.all([
+    prisma.marketingCampaign.findUnique({ where: { id } }),
+    prisma.campaignLead.findMany({ where: { campaignId: id }, orderBy: { id: 'asc' }, take: 250 }),
+    prisma.campaignLead.groupBy({ where: { campaignId: id }, by: ['status'], _count: { _all: true } }),
+  ])
   if (!campaign) return NextResponse.json({ success: false, error: 'Campaign not found.' }, { status: 404 })
-  return NextResponse.json({ success: true, campaign })
+  const counts = Object.fromEntries(groupedCounts.map(row => [row.status, row._count._all]))
+  return NextResponse.json({ success: true, campaign: { ...campaign, leads, counts, visibleLeadLimit: 250 } })
 }
 
 export async function PATCH(request: NextRequest, context: CampaignRouteContext) {
