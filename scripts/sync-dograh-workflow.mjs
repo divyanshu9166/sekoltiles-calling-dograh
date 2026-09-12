@@ -131,7 +131,7 @@ const commonCallbackParameters = [
 
 const outboundCallbackUuid = await upsertTool({
   name: 'request_outbound_human_callback',
-  description: 'Schedule a human-team callback during an outbound call. Customer name, phone and region come from trusted CRM context; never ask for the known name or phone.',
+  description: 'Schedule a human-team callback during an outbound call only after the customer explicitly requests or accepts a callback. Customer name, phone and region come from trusted CRM context; never ask for the known name or phone.',
   category: 'http_api',
   icon: 'phone-forwarded',
   icon_color: '#2563EB',
@@ -155,7 +155,7 @@ const outboundCallbackUuid = await upsertTool({
 
 const inboundCallbackUuid = await upsertTool({
   name: 'request_inbound_human_callback',
-  description: 'Schedule a human-team callback for an inbound caller. The caller phone is supplied automatically; collect only their name, preferred time and reason.',
+  description: 'Schedule a human-team callback for an inbound caller only after they explicitly agree to a callback. The caller phone is supplied automatically; collect their name, preferred time and reason one at a time. Do not use this tool merely because they requested a live transfer or human agent.',
   category: 'http_api',
   icon: 'phone-forwarded',
   icon_color: '#7C3AED',

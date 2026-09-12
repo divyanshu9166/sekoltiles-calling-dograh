@@ -1238,13 +1238,13 @@ export default function CallsPage() {
             <PhoneForwarded className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Call transfer settings</h2>
-            <p className="text-sm text-muted mt-1">Choose the human-team number Anushka provides when immediate assistance is requested.</p>
+            <h2 className="text-lg font-semibold text-foreground">Human escalation settings</h2>
+            <p className="text-sm text-muted mt-1">Choose the human-team number Anushka gives to callers who need immediate assistance.</p>
           </div>
         </div>
         <form onSubmit={handleCallHandlingSubmit} className="space-y-4">
           <label className="block">
-            <span className="block text-sm font-medium text-foreground mb-1.5">Transfer / human handoff number</span>
+            <span className="block text-sm font-medium text-foreground mb-1.5">Immediate human contact number</span>
             <input
               type="tel"
               value={callHandlingForm.transferPhone}
@@ -1258,13 +1258,13 @@ export default function CallsPage() {
             <span className="block text-xs text-muted mt-1.5">Use international E.164 format, including the country code.</span>
           </label>
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
-            Vobiz currently uses this for immediate human contact and callback handoff. A bridged live transfer requires an Asterisk ARI or another Dograh-supported transfer connection.
+            This Vobiz + Dograh streaming setup cannot perform a bridged live transfer. Anushka shares this number immediately, and records a callback only when the caller agrees. A true live transfer requires moving inbound telephony to a Dograh-supported transfer provider or an Asterisk ARI/SIP-trunk architecture.
           </div>
           {callHandlingError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{callHandlingError}</p>}
           {callHandlingMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{callHandlingMessage}</p>}
           <button type="submit" disabled={callHandlingLoading} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60 flex items-center gap-2">
             {callHandlingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {callHandlingLoading ? 'Publishing…' : 'Save transfer number'}
+            {callHandlingLoading ? 'Publishing…' : 'Save escalation number'}
           </button>
         </form>
       </div>
