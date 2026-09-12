@@ -38,6 +38,7 @@ import {
   Wifi,
   WifiOff,
   Settings,
+  LogOut,
   Loader2,
   Volume2,
 } from 'lucide-react';
@@ -54,6 +55,7 @@ const TABS = [
   { id: 'transcripts', label: 'Transcripts', icon: MessageSquare },
   { id: 'appointments', label: 'Appointments', icon: CalendarPlus },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
 const directionFilters = ['All', 'Inbound', 'Outbound'];
@@ -78,6 +80,10 @@ export default function CallsPage() {
   const [appointmentForm, setAppointmentForm] = useState(EMPTY_APPOINTMENT);
   const [appointmentLoading, setAppointmentLoading] = useState(false);
   const [appointmentMessage, setAppointmentMessage] = useState('');
+  const [settingsForm, setSettingsForm] = useState({ username: '', currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsMessage, setSettingsMessage] = useState('');
+  const [settingsError, setSettingsError] = useState('');
 
   // AI Caller state
   const [agentStatus, setAgentStatus] = useState(null);
@@ -144,9 +150,71 @@ export default function CallsPage() {
     if (activeTab === 'appointments') refreshAppointments();
   }, [activeTab]);
 
+  useEffect(() => {
+    if (activeTab !== 'settings') return;
+    setSettingsError('');
+    setSettingsMessage('');
+    fetch('/api/auth/settings', { cache: 'no-store' })
+      .then(async (response) => {
+        const result = await response.json();
+        if (response.status === 401) {
+          window.location.replace('/auth/login');
+          return;
+        }
+        if (response.ok && result.user) {
+          setSettingsForm((current) => ({ ...current, username: result.user.username }));
+        }
+      })
+      .catch(() => setSettingsError('Could not load account settings.'));
+  }, [activeTab]);
+
   useEffect(() => () => {
     window.DograhWidget?.end();
   }, []);
+
+  async function handleSettingsSubmit(event) {
+    event.preventDefault();
+    setSettingsLoading(true);
+    setSettingsError('');
+    setSettingsMessage('');
+    if (settingsForm.newPassword && settingsForm.newPassword.length < 8) {
+      setSettingsError('New password must be at least 8 characters.');
+      setSettingsLoading(false);
+      return;
+    }
+    if (settingsForm.newPassword !== settingsForm.confirmPassword) {
+      setSettingsError('New password and confirmation do not match.');
+      setSettingsLoading(false);
+      return;
+    }
+    try {
+      const response = await fetch('/api/auth/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: settingsForm.username,
+          currentPassword: settingsForm.currentPassword,
+          newPassword: settingsForm.newPassword,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setSettingsError(result.error || 'Could not update credentials.');
+        return;
+      }
+      setSettingsForm((current) => ({ ...current, username: result.user.username, currentPassword: '', newPassword: '', confirmPassword: '' }));
+      setSettingsMessage('Credentials updated. Your current browser session remains active.');
+    } catch {
+      setSettingsError('Unable to reach the server. Try again.');
+    } finally {
+      setSettingsLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    window.location.replace('/auth/login');
+  }
 
   // Derive phone book from call logs
   const phoneBook = useMemo(() => {
@@ -944,6 +1012,59 @@ export default function CallsPage() {
     );
   };
 
+  const renderSettings = () => (
+    <div className="max-w-2xl space-y-5">
+      <div className="glass-card p-5 sm:p-6">
+        <div className="flex items-start gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
+            <Settings className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Account settings</h2>
+            <p className="text-sm text-muted mt-1">Update the username or password used to access this call center.</p>
+          </div>
+        </div>
+        <form onSubmit={handleSettingsSubmit} className="space-y-4">
+          <label className="block">
+            <span className="block text-sm font-medium text-foreground mb-1.5">Username</span>
+            <input value={settingsForm.username} onChange={(event) => setSettingsForm((current) => ({ ...current, username: event.target.value }))} autoComplete="username" required className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+          </label>
+          <label className="block">
+            <span className="block text-sm font-medium text-foreground mb-1.5">Current password <span className="text-muted font-normal">(required to save)</span></span>
+            <input type="password" value={settingsForm.currentPassword} onChange={(event) => setSettingsForm((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" required className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-sm font-medium text-foreground mb-1.5">New password</span>
+              <input type="password" value={settingsForm.newPassword} onChange={(event) => setSettingsForm((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" placeholder="Leave blank to keep" className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+            </label>
+            <label className="block">
+              <span className="block text-sm font-medium text-foreground mb-1.5">Confirm new password</span>
+              <input type="password" value={settingsForm.confirmPassword} onChange={(event) => setSettingsForm((current) => ({ ...current, confirmPassword: event.target.value }))} autoComplete="new-password" placeholder="Repeat new password" className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+            </label>
+          </div>
+          {settingsError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{settingsError}</p>}
+          {settingsMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{settingsMessage}</p>}
+          <button type="submit" disabled={settingsLoading} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60 flex items-center gap-2">
+            {settingsLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {settingsLoading ? 'Saving…' : 'Save changes'}
+          </button>
+        </form>
+      </div>
+      <div className="glass-card p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h3 className="font-semibold text-foreground">Sign out</h3>
+          <p className="text-sm text-muted mt-1">Remove this browser's login cookie.</p>
+        </div>
+        <button type="button" onClick={handleLogout} className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-500/15 transition-colors">
+          <LogOut className="w-4 h-4" />
+          Sign out
+        </button>
+      </div>
+      <p className="text-xs text-muted">Sessions last 30 days on this browser. For security, changing credentials invalidates other active sessions.</p>
+    </div>
+  );
+
   // ─── ANALYTICS TAB ───
   const renderAnalytics = () => {
     const outcomeCount = {};
@@ -1575,6 +1696,7 @@ export default function CallsPage() {
       {activeTab === 'transcripts' && renderTranscripts()}
       {activeTab === 'appointments' && renderBookAppointment()}
       {activeTab === 'analytics' && renderAnalytics()}
+      {activeTab === 'settings' && renderSettings()}
 
       {/* ─── MOBILE STICKY ACTIVE-CALL BAR (sits above the 60px bottom nav) ─── */}
       {(browserCallState !== 'idle' || callingState === 'calling' || callingState === 'connected') && (

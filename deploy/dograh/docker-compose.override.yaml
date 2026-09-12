@@ -1,9 +1,13 @@
 # Production overrides for the separately installed Dograh Docker stack.
 # Copy this file beside Dograh's docker-compose.yaml on the VPS.
 services:
+  nginx:
+    extra_hosts:
+      - "host.docker.internal:172.18.0.1"
+
   api:
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:172.18.0.1"
     command:
       - sh
       - -c

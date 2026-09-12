@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { outboundAICallSchema } from '@/lib/validations/ai-call'
+import { getCurrentAdmin } from '@/lib/auth'
 
 /**
  * POST /api/calls/outbound
@@ -8,6 +9,9 @@ import { outboundAICallSchema } from '@/lib/validations/ai-call'
  */
 export async function POST(req: NextRequest) {
   try {
+    if (!await getCurrentAdmin()) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
     const body = await req.json()
     const parsed = outboundAICallSchema.safeParse(body)
     if (!parsed.success) {

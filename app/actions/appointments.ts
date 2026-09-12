@@ -9,8 +9,10 @@ import {
   normalizeCustomerPhone,
   timeToMinutes,
 } from '@/lib/appointments/booking'
+import { getCurrentAdmin } from '@/lib/auth'
 
 export async function getAppointments() {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.', data: [] }
   const appointments = await prisma.appointment.findMany({
     include: { contact: true },
     orderBy: [{ date: 'asc' }, { time: 'asc' }],
@@ -32,6 +34,7 @@ export async function getAppointments() {
 }
 
 export async function createAppointment(data: unknown) {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   const parsed = createAppointmentSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -85,6 +88,7 @@ export async function createAppointment(data: unknown) {
 }
 
 export async function updateAppointmentStatus(id: number, status: string) {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   if (!['Scheduled', 'Completed', 'Cancelled'].includes(status)) {
     return { success: false, error: 'Unsupported appointment status.' }
   }

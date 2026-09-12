@@ -6,8 +6,10 @@ import { createCallLogSchema } from '@/lib/validations/call'
 import type { CallDirection, CallStatus } from '@prisma/client'
 import { outboundAICallSchema } from '@/lib/validations/ai-call'
 import { callingAgentStatus } from '@/lib/calling-agent-status'
+import { getCurrentAdmin } from '@/lib/auth'
 
 export async function getCallLogs() {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.', data: [] }
   const calls = await prisma.callLog.findMany({
     include: { contact: true, transcript: true },
     orderBy: { date: 'desc' },
@@ -44,6 +46,7 @@ export async function getCallLogs() {
 }
 
 export async function createCallLog(data: unknown) {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   const parsed = createCallLogSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -77,6 +80,7 @@ export async function createCallLog(data: unknown) {
 }
 
 export async function getCallStats() {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   const [total, completed, missed, totalDuration, aiHandled] = await Promise.all([
     prisma.callLog.count(),
     prisma.callLog.count({ where: { status: 'COMPLETED' } }),
@@ -98,6 +102,7 @@ export async function getCallStats() {
 }
 
 export async function initiateAICall(phoneNumber: string, reason: string, customerName: string = '') {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   const parsed = outboundAICallSchema.safeParse({ phoneNumber, reason, customerName })
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
@@ -121,5 +126,6 @@ export async function initiateAICall(phoneNumber: string, reason: string, custom
 }
 
 export async function getAIAgentStatus() {
+  if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
   return { success: true, data: await callingAgentStatus() }
 }
