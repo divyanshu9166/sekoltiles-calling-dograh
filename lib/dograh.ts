@@ -58,6 +58,30 @@ function optionalInteger(name: string, env: DograhEnvironment) {
   return Number(value)
 }
 
+/**
+ * Dograh's Asterisk ARI provider originates exactly the PJSIP dial string it
+ * receives. Keep the customer number in `initial_context`, but send the call
+ * through our named Asterisk trunk when ARI is selected.
+ */
+export function dograhOutboundDialTarget(
+  phoneNumber: string,
+  env: DograhEnvironment = process.env,
+) {
+  if (env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() !== 'ari') {
+    return phoneNumber
+  }
+
+  const trunkEndpoint = env.DOGRAH_ARI_TRUNK_ENDPOINT?.trim()
+  if (!trunkEndpoint) {
+    throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT is required when DOGRAH_TELEPHONY_PROVIDER=ari')
+  }
+  if (!/^[A-Za-z0-9_.-]+$/.test(trunkEndpoint)) {
+    throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT may contain only letters, numbers, dots, underscores, and hyphens')
+  }
+
+  return `PJSIP/${phoneNumber}@${trunkEndpoint}`
+}
+
 async function dograhRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -105,10 +129,11 @@ export async function triggerDograhCall(
     {
       method: 'POST',
       body: JSON.stringify({
-        phone_number: input.phoneNumber,
+        phone_number: dograhOutboundDialTarget(input.phoneNumber, env),
         initial_context: {
           direction: 'outbound',
           customer_name: input.customerName || 'Customer',
+          phone_number: input.phoneNumber,
           called_number: input.phoneNumber,
           reason: input.reason,
           region: input.region,

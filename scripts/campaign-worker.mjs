@@ -17,6 +17,22 @@ const prisma = new PrismaClient({ adapter: new PrismaPg(pool) })
 const rawDograhBase = process.env.DOGRAH_API_URL.trim().replace(/\/+$/, '')
 const dograhBase = rawDograhBase.endsWith('/api/v1') ? rawDograhBase : `${rawDograhBase}/api/v1`
 const dograhHeaders = { 'Content-Type': 'application/json', 'X-API-Key': process.env.DOGRAH_API_KEY.trim() }
+
+function dograhOutboundDialTarget(phoneNumber) {
+  if (process.env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() !== 'ari') {
+    return phoneNumber
+  }
+
+  const trunkEndpoint = process.env.DOGRAH_ARI_TRUNK_ENDPOINT?.trim()
+  if (!trunkEndpoint) {
+    throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT is required when DOGRAH_TELEPHONY_PROVIDER=ari')
+  }
+  if (!/^[A-Za-z0-9_.-]+$/.test(trunkEndpoint)) {
+    throw new Error('DOGRAH_ARI_TRUNK_ENDPOINT is invalid')
+  }
+
+  return `PJSIP/${phoneNumber}@${trunkEndpoint}`
+}
 const pollIntervalMs = 3000
 let stopping = false
 let workflowId
@@ -193,7 +209,7 @@ async function dialLead(lead) {
     const run = await dograhRequest(`/public/agent/workflow/${encodeURIComponent(process.env.DOGRAH_WORKFLOW_UUID.trim())}`, {
       method: 'POST',
       body: JSON.stringify({
-        phone_number: lead.phone,
+        phone_number: dograhOutboundDialTarget(lead.phone),
         initial_context: {
           direction: 'outbound',
           phone_number: lead.phone,
