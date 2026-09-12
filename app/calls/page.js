@@ -42,6 +42,11 @@ import {
   LogOut,
   Loader2,
   Volume2,
+  Megaphone,
+  Upload,
+  PauseCircle,
+  RefreshCw,
+  Sheet,
 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
@@ -51,6 +56,7 @@ import { createAppointment, getAppointments, updateAppointmentStatus } from '@/a
 
 const TABS = [
   { id: 'ai-caller', label: 'AI Caller', icon: Bot },
+  { id: 'campaigns', label: 'Bulk Campaigns', icon: Megaphone },
   { id: 'logs', label: 'Call Logs', icon: Phone },
   { id: 'phonebook', label: 'Phone Book', icon: BookOpen },
   { id: 'transcripts', label: 'Transcripts', icon: MessageSquare },
@@ -63,6 +69,7 @@ const directionFilters = ['All', 'Inbound', 'Outbound'];
 const statusFilters = ['All', 'Completed', 'Missed', 'No Answer', 'Busy'];
 const tagFilters = ['All', 'Hot Lead', 'Warm Lead', 'Cold Lead', 'Customer', 'Unknown'];
 const EMPTY_APPOINTMENT = { customer: '', phone: '', date: '', time: '', purpose: '', region: '', notes: '' };
+const DEFAULT_CAMPAIGN_INSTRUCTIONS = 'Introduce the 12x18 and 12x24 tile range. Ask which size the customer requires, whether they want the catalog, and whether they want a showroom visit. If they want to visit, offer to book an appointment.';
 
 export default function CallsPage() {
   const [callLogs, setCallLogs] = useState([]);
@@ -102,6 +109,22 @@ export default function CallsPage() {
   const [browserCallState, setBrowserCallState] = useState('idle'); // idle | connecting | connected
   const [callMessage, setCallMessage] = useState('');
   const dograhWidgetReadyRef = useRef(false);
+  const campaignFileInputRef = useRef(null);
+  const campaignEditDirtyRef = useRef(false);
+  const [campaigns, setCampaigns] = useState([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  const [campaignDetail, setCampaignDetail] = useState(null);
+  const [campaignForm, setCampaignForm] = useState({
+    name: '',
+    instructions: DEFAULT_CAMPAIGN_INSTRUCTIONS,
+    googleSheetUrl: '',
+    interCallDelaySec: 15,
+  });
+  const [campaignFile, setCampaignFile] = useState(null);
+  const [campaignLoading, setCampaignLoading] = useState(false);
+  const [campaignMessage, setCampaignMessage] = useState('');
+  const [campaignError, setCampaignError] = useState('');
+  const [campaignEdit, setCampaignEdit] = useState({ name: '', instructions: '', interCallDelaySec: 15 });
 
   const refreshLogs = () => {
     getCallLogs().then(res => {
@@ -113,6 +136,33 @@ export default function CallsPage() {
     getAppointments().then(res => {
       if (res.success) setAppointments(res.data);
     });
+  };
+
+  const refreshCampaigns = async () => {
+    const response = await fetch('/api/campaigns', { cache: 'no-store' });
+    const result = await response.json();
+    if (response.status === 401) {
+      window.location.replace('/auth/login');
+      return [];
+    }
+    if (!response.ok) throw new Error(result.error || 'Could not load campaigns.');
+    setCampaigns(result.campaigns || []);
+    return result.campaigns || [];
+  };
+
+  const loadCampaignDetail = async (id) => {
+    if (!id) return;
+    const response = await fetch(`/api/campaigns/${id}`, { cache: 'no-store' });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Could not load campaign details.');
+    setCampaignDetail(result.campaign);
+    if (!campaignEditDirtyRef.current) {
+      setCampaignEdit({
+        name: result.campaign.name,
+        instructions: result.campaign.instructions,
+        interCallDelaySec: result.campaign.interCallDelaySec,
+      });
+    }
   };
 
   useEffect(() => {
@@ -155,6 +205,30 @@ export default function CallsPage() {
   useEffect(() => {
     if (activeTab === 'appointments') refreshAppointments();
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'campaigns') return;
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await refreshCampaigns();
+        if (cancelled) return;
+        const id = selectedCampaignId || list[0]?.id;
+        if (id) {
+          if (!selectedCampaignId) setSelectedCampaignId(id);
+          await loadCampaignDetail(id);
+        }
+      } catch (error) {
+        if (!cancelled) setCampaignError(error.message || 'Could not refresh campaigns.');
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeTab, selectedCampaignId]);
 
   useEffect(() => {
     if (activeTab !== 'settings') return;
@@ -261,6 +335,88 @@ export default function CallsPage() {
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     window.location.replace('/auth/login');
+  }
+
+  async function handleCampaignCreate(event) {
+    event.preventDefault();
+    setCampaignLoading(true);
+    setCampaignError('');
+    setCampaignMessage('');
+    try {
+      const data = new FormData();
+      data.set('name', campaignForm.name);
+      data.set('instructions', campaignForm.instructions);
+      data.set('googleSheetUrl', campaignForm.googleSheetUrl);
+      data.set('interCallDelaySec', String(campaignForm.interCallDelaySec));
+      if (campaignFile) data.set('file', campaignFile);
+      const response = await fetch('/api/campaigns', { method: 'POST', body: data });
+      const result = await response.json();
+      if (!response.ok) {
+        setCampaignError(result.error || 'Campaign could not be created.');
+        return;
+      }
+      setCampaignForm({ name: '', instructions: DEFAULT_CAMPAIGN_INSTRUCTIONS, googleSheetUrl: '', interCallDelaySec: 15 });
+      setCampaignFile(null);
+      if (campaignFileInputRef.current) campaignFileInputRef.current.value = '';
+      campaignEditDirtyRef.current = false;
+      setSelectedCampaignId(result.campaign.id);
+      await refreshCampaigns();
+      await loadCampaignDetail(result.campaign.id);
+      const imported = result.import;
+      setCampaignMessage(`Campaign created with ${imported.acceptedRows} contacts. ${imported.rejectedRows} invalid and ${imported.duplicateRows} duplicate rows skipped.`);
+    } catch (error) {
+      setCampaignError(error.message || 'Campaign could not be created.');
+    } finally {
+      setCampaignLoading(false);
+    }
+  }
+
+  async function handleCampaignControl(action) {
+    if (!campaignDetail) return;
+    setCampaignLoading(true);
+    setCampaignError('');
+    setCampaignMessage('');
+    try {
+      const response = await fetch(`/api/campaigns/${campaignDetail.id}/control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Campaign action failed.');
+      await refreshCampaigns();
+      await loadCampaignDetail(campaignDetail.id);
+      setCampaignMessage(action === 'pause' ? 'Campaign paused. The active call can finish; no new call will start.' : 'Campaign started. Contacts will be called one at a time.');
+    } catch (error) {
+      setCampaignError(error.message || 'Campaign action failed.');
+    } finally {
+      setCampaignLoading(false);
+    }
+  }
+
+  async function handleCampaignUpdate(event) {
+    event.preventDefault();
+    if (!campaignDetail) return;
+    setCampaignLoading(true);
+    setCampaignError('');
+    setCampaignMessage('');
+    try {
+      const response = await fetch(`/api/campaigns/${campaignDetail.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(campaignEdit),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Campaign instructions could not be saved.');
+      campaignEditDirtyRef.current = false;
+      await refreshCampaigns();
+      await loadCampaignDetail(campaignDetail.id);
+      setCampaignMessage('Campaign instructions saved. Future calls will use the updated script.');
+    } catch (error) {
+      setCampaignError(error.message || 'Campaign instructions could not be saved.');
+    } finally {
+      setCampaignLoading(false);
+    }
   }
 
   // Derive phone book from call logs
@@ -1163,6 +1319,212 @@ export default function CallsPage() {
     </div>
   );
 
+  const renderCampaigns = () => {
+    const leadCounts = (campaignDetail?.leads || []).reduce((counts, lead) => {
+      counts[lead.status] = (counts[lead.status] || 0) + 1;
+      return counts;
+    }, {});
+    const totalLeads = campaignDetail?.leads?.length || 0;
+    const finishedLeads = (leadCounts.COMPLETED || 0) + (leadCounts.FAILED || 0) + (leadCounts.SKIPPED || 0);
+    const progress = totalLeads ? Math.round((finishedLeads / totalLeads) * 100) : 0;
+    const statusClass = (status) => ({
+      DRAFT: 'bg-zinc-500/10 text-muted border-zinc-500/20',
+      RUNNING: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20',
+      PAUSED: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
+      COMPLETED: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20',
+      PENDING: 'bg-zinc-500/10 text-muted border-zinc-500/20',
+      CALLING: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20',
+      FAILED: 'bg-red-500/10 text-red-600 dark:text-red-300 border-red-500/20',
+      SKIPPED: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
+    }[status] || 'bg-zinc-500/10 text-muted border-zinc-500/20');
+
+    return (
+      <div className="space-y-6">
+        <div className="glass-card p-5 sm:p-6">
+          <div className="flex items-start gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
+              <Megaphone className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Create bulk marketing campaign</h2>
+              <p className="text-sm text-muted mt-1">Import Name, Contact Number, and Region/Zone. Calls run sequentially, one customer at a time.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleCampaignCreate} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3">
+              <label className="block">
+                <span className="block text-sm font-medium text-foreground mb-1.5">Campaign name</span>
+                <input
+                  value={campaignForm.name}
+                  onChange={(event) => setCampaignForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="e.g. Rajasthan dealer outreach"
+                  maxLength={120}
+                  required
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-sm font-medium text-foreground mb-1.5">Gap between calls</span>
+                <select
+                  value={campaignForm.interCallDelaySec}
+                  onChange={(event) => setCampaignForm((current) => ({ ...current, interCallDelaySec: Number(event.target.value) }))}
+                  className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent"
+                >
+                  <option value={10}>10 seconds</option>
+                  <option value={15}>15 seconds</option>
+                  <option value={30}>30 seconds</option>
+                  <option value={60}>1 minute</option>
+                </select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="block text-sm font-medium text-foreground mb-1.5">Agent prompt / campaign instructions</span>
+              <textarea
+                value={campaignForm.instructions}
+                onChange={(event) => setCampaignForm((current) => ({ ...current, instructions: event.target.value }))}
+                rows={6}
+                minLength={10}
+                maxLength={6000}
+                required
+                placeholder="Tell Anushka what to say, which questions to ask, what confirmation to collect, and whether to offer an appointment."
+                className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y"
+              />
+              <span className="block text-xs text-muted mt-1.5">These instructions apply only to this campaign. Company facts, verified pricing and appointment safety rules remain protected.</span>
+            </label>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <label className="block rounded-xl border border-border bg-surface p-4">
+                <span className="flex items-center gap-2 text-sm font-medium text-foreground mb-2"><Upload className="w-4 h-4 text-accent" />Excel or CSV</span>
+                <input
+                  ref={campaignFileInputRef}
+                  type="file"
+                  accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                  onChange={(event) => setCampaignFile(event.target.files?.[0] || null)}
+                  className="block w-full text-xs text-muted file:mr-3 file:rounded-lg file:border-0 file:bg-accent/15 file:px-3 file:py-2 file:text-xs file:font-medium file:text-accent"
+                />
+                <span className="block text-[11px] text-muted mt-2">Maximum 5 MB and 5,000 rows. First row must contain the three required headers.</span>
+              </label>
+              <label className="block rounded-xl border border-border bg-surface p-4">
+                <span className="flex items-center gap-2 text-sm font-medium text-foreground mb-2"><Sheet className="w-4 h-4 text-accent" />Public Google Sheet</span>
+                <input
+                  type="url"
+                  value={campaignForm.googleSheetUrl}
+                  onChange={(event) => setCampaignForm((current) => ({ ...current, googleSheetUrl: event.target.value }))}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground outline-none focus:border-accent"
+                />
+                <span className="block text-[11px] text-muted mt-2">Set Google sharing to “Anyone with the link”. An uploaded file takes priority when both are supplied.</span>
+              </label>
+            </div>
+
+            {campaignError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{campaignError}</p>}
+            {campaignMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{campaignMessage}</p>}
+            <button type="submit" disabled={campaignLoading || (!campaignFile && !campaignForm.googleSheetUrl.trim())} className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50">
+              {campaignLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {campaignLoading ? 'Importing…' : 'Import and create campaign'}
+            </button>
+          </form>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-5">
+          <div className="glass-card p-3 h-fit">
+            <div className="flex items-center justify-between px-2 py-2">
+              <h3 className="font-semibold text-foreground">Campaigns</h3>
+              <button type="button" onClick={() => refreshCampaigns().catch((error) => setCampaignError(error.message))} className="p-2 rounded-lg text-muted hover:text-foreground hover:bg-surface" title="Refresh campaigns">
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-[540px] overflow-y-auto">
+              {campaigns.length === 0 && <p className="px-2 py-6 text-sm text-muted text-center">No campaigns yet.</p>}
+              {campaigns.map((campaign) => {
+                const total = Object.values(campaign.counts || {}).reduce((sum, value) => sum + value, 0);
+                const done = (campaign.counts?.COMPLETED || 0) + (campaign.counts?.FAILED || 0) + (campaign.counts?.SKIPPED || 0);
+                return (
+                  <button
+                    key={campaign.id}
+                    type="button"
+                    onClick={() => {
+                      campaignEditDirtyRef.current = false;
+                      setSelectedCampaignId(campaign.id);
+                    }}
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${selectedCampaignId === campaign.id ? 'border-accent bg-accent/10' : 'border-border bg-surface hover:bg-surface-hover'}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground line-clamp-2">{campaign.name}</p>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(campaign.status)}`}>{campaign.status}</span>
+                    </div>
+                    <p className="mt-2 text-xs text-muted">{done} of {total} processed</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="glass-card p-5 sm:p-6 min-w-0">
+            {!campaignDetail ? (
+              <div className="py-14 text-center text-muted"><Megaphone className="w-8 h-8 mx-auto mb-3 opacity-50" /><p className="text-sm">Select or create a campaign.</p></div>
+            ) : (
+              <div className="space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-semibold text-foreground">{campaignDetail.name}</h3>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(campaignDetail.status)}`}>{campaignDetail.status}</span>
+                    </div>
+                    <p className="text-xs text-muted mt-1">{campaignDetail.sourceType === 'google_sheet' ? 'Google Sheet' : campaignDetail.sourceName} · one call at a time</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {campaignDetail.status === 'RUNNING' ? (
+                      <button type="button" onClick={() => handleCampaignControl('pause')} disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300 disabled:opacity-50">
+                        <PauseCircle className="w-4 h-4" />Pause
+                      </button>
+                    ) : campaignDetail.status !== 'COMPLETED' ? (
+                      <button type="button" onClick={() => handleCampaignControl(campaignDetail.status === 'PAUSED' ? 'resume' : 'start')} disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                        <Play className="w-4 h-4" />{campaignDetail.status === 'PAUSED' ? 'Resume' : 'Start campaign'}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs text-muted mb-1.5"><span>{finishedLeads} of {totalLeads} processed</span><span>{progress}%</span></div>
+                  <div className="h-2 rounded-full bg-surface overflow-hidden"><div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progress}%` }} /></div>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted">
+                    <span>Pending: {leadCounts.PENDING || 0}</span><span>Calling: {leadCounts.CALLING || 0}</span><span>Completed: {leadCounts.COMPLETED || 0}</span><span>Failed: {leadCounts.FAILED || 0}</span>
+                  </div>
+                </div>
+
+                <form onSubmit={handleCampaignUpdate} className="rounded-xl border border-border bg-surface p-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3">
+                    <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Campaign name</span><input value={campaignEdit.name} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, name: event.target.value })); }} maxLength={120} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent" /></label>
+                    <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Call gap</span><select value={campaignEdit.interCallDelaySec} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, interCallDelaySec: Number(event.target.value) })); }} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>1 minute</option></select></label>
+                  </div>
+                  <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Agent prompt / instructions</span><textarea value={campaignEdit.instructions} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, instructions: event.target.value })); }} rows={5} minLength={10} maxLength={6000} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y" /></label>
+                  <button type="submit" disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-sm font-medium text-accent disabled:opacity-50">Save instructions</button>
+                </form>
+
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full min-w-[650px] text-sm">
+                    <thead className="bg-surface"><tr className="text-left text-xs text-muted"><th className="px-3 py-2.5 font-medium">Name</th><th className="px-3 py-2.5 font-medium">Contact number</th><th className="px-3 py-2.5 font-medium">Region / Zone</th><th className="px-3 py-2.5 font-medium">Status</th><th className="px-3 py-2.5 font-medium">Outcome</th></tr></thead>
+                    <tbody className="divide-y divide-border">
+                      {campaignDetail.leads.map((lead) => (
+                        <tr key={lead.id} className="text-foreground">
+                          <td className="px-3 py-2.5 font-medium">{lead.name}</td><td className="px-3 py-2.5 text-muted">{lead.phone}</td><td className="px-3 py-2.5 text-muted">{lead.region || 'Agent will ask'}</td><td className="px-3 py-2.5"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(lead.status)}`}>{lead.status}</span></td><td className="px-3 py-2.5 text-xs text-muted max-w-[220px] truncate" title={lead.lastError || lead.outcome || ''}>{lead.outcome || lead.lastError || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // ─── ANALYTICS TAB ───
   const renderAnalytics = () => {
     const outcomeCount = {};
@@ -1813,6 +2175,7 @@ export default function CallsPage() {
 
       {/* Tab Content */}
       {activeTab === 'ai-caller' && renderAICaller()}
+      {activeTab === 'campaigns' && renderCampaigns()}
       {activeTab === 'logs' && renderCallLogs()}
       {activeTab === 'phonebook' && renderPhoneBook()}
       {activeTab === 'transcripts' && renderTranscripts()}

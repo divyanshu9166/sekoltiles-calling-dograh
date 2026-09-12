@@ -136,7 +136,9 @@ export async function syncRecentDograhRuns(force = false) {
     const byRunId = new Map(existing.map(call => [call.dograhRunId, call]))
     const pending = runs.filter(summary => {
       const context = summary.initial_context || {}
-      const isSekolRun = context.source === 'sekol-calling-crm' || summary.call_type === 'inbound'
+      const isSekolRun = context.source === 'sekol-calling-crm'
+        || context.source === 'sekol-bulk-campaign'
+        || summary.call_type === 'inbound'
       if (!isSekolRun) return false
       const call = byRunId.get(String(summary.id))
       return !call || !call.transcript || !call.recordingUrl || !['COMPLETED', 'FAILED', 'MISSED', 'NO_ANSWER', 'BUSY'].includes(call.status)

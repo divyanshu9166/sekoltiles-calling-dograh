@@ -115,3 +115,59 @@ model AdminSession {
   @@index([userId])
   @@index([expiresAt])
 }
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
+}
+
+enum CampaignLeadStatus {
+  PENDING
+  CALLING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+model MarketingCampaign {
+  id                Int            @id @default(autoincrement())
+  name              String
+  instructions      String
+  status            CampaignStatus @default(DRAFT)
+  sourceType        String
+  sourceName        String?
+  interCallDelaySec Int            @default(15)
+  nextCallAt        DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  leads             CampaignLead[]
+
+  @@index([status, createdAt])
+}
+
+model CampaignLead {
+  id           Int                @id @default(autoincrement())
+  campaignId   Int
+  campaign     MarketingCampaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  name         String
+  phone        String
+  region       String?
+  status       CampaignLeadStatus @default(PENDING)
+  attempts     Int                @default(0)
+  callLogId    Int?
+  dograhRunId  String?
+  outcome      String?
+  lastError    String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@unique([campaignId, phone])
+  @@index([campaignId, status, id])
+  @@index([dograhRunId])
+}
