@@ -13,17 +13,55 @@ function toStatus(value: unknown): CallStatus {
 }
 
 function transcriptMessages(value: unknown): Prisma.InputJsonValue | null {
-  if (Array.isArray(value)) return value as Prisma.InputJsonValue
+  if (Array.isArray(value)) {
+    const normalized = value.map((item, index) => {
+      if (!item || typeof item !== 'object') return null
+      const message = item as Record<string, unknown>
+      const role = String(message.from || message.role || message.speaker || '').toLowerCase()
+      const text = String(message.text || message.content || '').trim()
+      if (!text) return null
+      return {
+        from: /user|customer|caller/.test(role) ? 'customer' : 'agent',
+        text,
+        time: typeof message.time === 'string' ? message.time : `0:${String(index * 4).padStart(2, '0')}`,
+      }
+    }).filter(Boolean)
+    return normalized.length ? normalized as Prisma.InputJsonValue : null
+  }
   if (typeof value !== 'string' || !value.trim()) return null
 
-  return value.split('\n').filter(Boolean).map((line, index) => {
-    const customer = /^(customer|user|caller):\s*/i.test(line)
+  const lines = value.split('\n').map(line => line.trim()).filter(Boolean)
+  const firstTimestamp = lines.map(line => line.match(/^\[([^\]]+)\]/)?.[1])
+    .map(value => value ? new Date(value).getTime() : Number.NaN)
+    .find(value => Number.isFinite(value))
+  return lines.map((line, index) => {
+    const match = line.match(/^(?:\[([^\]]+)\]\s*)?(assistant|agent|bot|customer|user|caller):\s*(.*)$/i)
+    const timestamp = match?.[1] ? new Date(match[1]).getTime() : Number.NaN
+    const elapsed = Number.isFinite(timestamp) && firstTimestamp ? Math.max(0, Math.round((timestamp - firstTimestamp) / 1000)) : index * 4
+    const role = match?.[2] || 'assistant'
     return {
-      from: customer ? 'customer' : 'agent',
-      text: line.replace(/^(agent|assistant|bot|customer|user|caller):\s*/i, '').trim(),
-      time: `${Math.floor(index * 7 / 60)}:${String((index * 7) % 60).padStart(2, '0')}`,
+      from: /customer|user|caller/i.test(role) ? 'customer' : 'agent',
+      text: (match?.[3] || line).trim(),
+      time: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`,
     }
   }) as Prisma.InputJsonValue
+}
+
+async function loadTranscript(raw: unknown, transcriptUrl: string | null) {
+  const direct = transcriptMessages(raw)
+  if (direct || !transcriptUrl) return direct
+
+  try {
+    const allowedOrigin = new URL(process.env.DOGRAH_API_URL || '').origin
+    const url = new URL(transcriptUrl)
+    if (url.origin !== allowedOrigin) throw new Error('Unexpected transcript host')
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(8_000) })
+    if (!response.ok) throw new Error(`Transcript download failed (${response.status})`)
+    return transcriptMessages(await response.text())
+  } catch (error) {
+    console.error('Could not download Dograh transcript:', error)
+    return null
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -42,11 +80,36 @@ export async function POST(req: NextRequest) {
     const crmCallLogId = Number(body.crm_call_log_id || initialContext.crm_call_log_id)
     const runId = String(body.run_id || body.workflow_run_id || '')
 
-    const callLog = Number.isInteger(crmCallLogId) && crmCallLogId > 0
+    let callLog = Number.isInteger(crmCallLogId) && crmCallLogId > 0
       ? await prisma.callLog.findUnique({ where: { id: crmCallLogId } })
       : runId
         ? await prisma.callLog.findUnique({ where: { dograhRunId: runId } })
         : null
+
+    if (!callLog && String(initialContext.direction || '').toLowerCase() === 'inbound' && runId) {
+      const phone = typeof initialContext.caller_number === 'string' ? initialContext.caller_number : 'Unknown caller'
+      const now = new Date()
+      callLog = await prisma.callLog.create({
+        data: {
+          customerName: typeof initialContext.customer_name === 'string' && initialContext.customer_name.trim() ? initialContext.customer_name : 'Unknown Customer',
+          phone,
+          direction: 'INBOUND',
+          status: 'IN_PROGRESS',
+          duration: '0:00',
+          durationSec: 0,
+          agent: 'AI Agent - Anushka',
+          date: now,
+          time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
+          purpose: 'Inbound enquiry',
+          region: typeof initialContext.region === 'string' && initialContext.region.trim() ? initialContext.region.trim().slice(0, 120) : null,
+          outcome: 'Inbound Dograh call',
+          notes: `Inbound call received from Dograh run ${runId}`,
+          dograhRunId: runId,
+          callType: 'ai_inbound',
+          aiHandled: true,
+        },
+      })
+    }
 
     if (!callLog) return NextResponse.json({ error: 'Call log not found' }, { status: 404 })
 
@@ -56,7 +119,7 @@ export async function POST(req: NextRequest) {
     const durationSec = Math.max(0, Math.round(Number(body.duration || body.duration_seconds || 0)))
     const recordingUrl = typeof body.recording_url === 'string' && body.recording_url ? body.recording_url : null
     const transcriptUrl = typeof body.transcript_url === 'string' && body.transcript_url ? body.transcript_url : null
-    const messages = transcriptMessages(body.transcript)
+    const messages = await loadTranscript(body.transcript, transcriptUrl)
 
     await prisma.callLog.update({
       where: { id: callLog.id },
@@ -66,6 +129,9 @@ export async function POST(req: NextRequest) {
         durationSec,
         duration: `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`,
         outcome: String(rawOutcome),
+        region: typeof initialContext.region === 'string' && initialContext.region.trim()
+          ? initialContext.region.trim().slice(0, 120)
+          : callLog.region,
         recording: !!recordingUrl,
         recordingUrl,
         transcriptUrl,

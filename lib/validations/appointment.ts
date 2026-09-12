@@ -6,6 +6,7 @@ export const createAppointmentSchema = z.object({
   date: z.string().min(1),
   time: z.string().min(1),
   purpose: z.string().min(1),
+  region: z.string().trim().max(120).optional(),
   notes: z.string().optional(),
 })
 

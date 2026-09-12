@@ -7,9 +7,15 @@ import type { CallDirection, CallStatus } from '@prisma/client'
 import { outboundAICallSchema } from '@/lib/validations/ai-call'
 import { callingAgentStatus } from '@/lib/calling-agent-status'
 import { getCurrentAdmin } from '@/lib/auth'
+import { syncRecentDograhRuns } from '@/lib/calling-agent/dograh-run-sync'
 
 export async function getCallLogs() {
   if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.', data: [] }
+  try {
+    await syncRecentDograhRuns()
+  } catch (error) {
+    console.error('Dograh call reconciliation failed:', error)
+  }
   const calls = await prisma.callLog.findMany({
     include: { contact: true, transcript: true },
     orderBy: { date: 'desc' },
@@ -29,6 +35,7 @@ export async function getCallLogs() {
       date: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(c.date),
       time: c.date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
       purpose: c.purpose,
+      region: c.region,
       outcome: c.outcome,
       notes: c.notes,
       recording: c.recording,
@@ -101,9 +108,9 @@ export async function getCallStats() {
   }
 }
 
-export async function initiateAICall(phoneNumber: string, reason: string, customerName: string = '') {
+export async function initiateAICall(phoneNumber: string, reason: string, customerName: string = '', region: string = '') {
   if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.' }
-  const parsed = outboundAICallSchema.safeParse({ phoneNumber, reason, customerName })
+  const parsed = outboundAICallSchema.safeParse({ phoneNumber, reason, customerName, region })
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
     const DOGRAH_API_URL = process.env.DOGRAH_API_URL

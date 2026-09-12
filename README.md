@@ -23,17 +23,18 @@ Open [http://localhost:3000/calls](http://localhost:3000/calls).
 
 - `DATABASE_URL`
 - `CRM_API_URL=http://localhost:3000`
+- `CRM_PUBLIC_URL` — public HTTPS CRM origin reachable from Dograh, for example `https://crm.example.com`
 - `CRM_API_SECRET`
 - `DOGRAH_API_URL` — public URL of the self-hosted Dograh instance
 - `DOGRAH_API_KEY` — create this under Dograh Settings → API Keys
 - `DOGRAH_WORKFLOW_UUID` — stable UUID of the published Sekol workflow
 - `NEXT_PUBLIC_DOGRAH_WIDGET_URL` — optional headless voice-widget script URL
 
-Configure Vobiz inside Dograh, mark it as the default outbound configuration, add the caller number, and publish the workflow. For post-call CRM sync, add a final Dograh Webhook node:
+Configure Vobiz inside Dograh, mark it as the default outbound configuration, and add the caller number. Then publish the version-controlled Sekol prompt, appointment tools, end-call tool, and transcript webhook with:
 
-- Endpoint: `https://YOUR_CRM/api/calls/dograh-webhook`
-- Header: `X-API-Secret: <CRM_API_SECRET>`
-- Payload fields: `run_id`, `initial_context`, `gathered_context`, `call_status`, `call_disposition`, `duration`, `recording_url`, `transcript_url`, and optionally `transcript`, `summary`, `sentiment`
+`npm run dograh:sync`
+
+The command is idempotent and preserves the model and telephony settings selected in Dograh. The CRM also reconciles recent Dograh run details when call logs load, so a delayed or missed webhook cannot permanently hide a transcript or final call status.
 
 LiveKit is not part of this project. Voice orchestration is exclusively handled by the separately deployed Dograh instance.
 

@@ -11,6 +11,7 @@ export const outboundAICallSchema = z.object({
     .pipe(z.string().regex(/^\+[1-9]\d{7,14}$/, 'Enter a valid phone number with country code, e.g. +919876543210'))
     .refine(isSupportedOutboundPhone, 'Indian mobile numbers need +91 followed by all 10 mobile digits.'),
   customerName: z.string().trim().max(120).optional().default(''),
+  region: z.string().trim().max(120, 'Region/zone must be 120 characters or fewer').optional().default(''),
   reason: z.string().trim().max(2000).optional().default('')
     .refine(value => value !== 'Custom reason', 'Enter the custom call reason')
     .transform(value => value || 'Follow-up call'),

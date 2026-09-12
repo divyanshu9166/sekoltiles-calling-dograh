@@ -6,6 +6,7 @@ type TriggerCallInput = {
   phoneNumber: string
   customerName: string
   reason: string
+  region: string
   crmCallLogId: number
 }
 
@@ -13,6 +14,28 @@ export type DograhCallResponse = {
   status: string
   workflow_run_id: number
   workflow_run_name: string
+}
+
+export type DograhRealtimeEvent = {
+  type?: string
+  timestamp?: string
+  payload?: { text?: string; final?: boolean; timestamp?: string }
+}
+
+export type DograhWorkflowRun = {
+  id: number
+  workflow_id: number
+  name?: string
+  created_at?: string
+  is_completed?: boolean
+  call_type?: string
+  transcript_url?: string | null
+  transcript_public_url?: string | null
+  recording_public_url?: string | null
+  initial_context?: Record<string, unknown> | null
+  gathered_context?: Record<string, unknown> | null
+  cost_info?: { call_duration_seconds?: number } | null
+  logs?: { realtime_feedback_events?: DograhRealtimeEvent[] } | null
 }
 
 function required(name: string, env: DograhEnvironment) {
@@ -86,6 +109,7 @@ export async function triggerDograhCall(
           customer_name: input.customerName || 'Customer',
           called_number: input.phoneNumber,
           reason: input.reason,
+          region: input.region,
           crm_call_log_id: input.crmCallLogId,
           // Dograh uses this reserved context key to speak a deterministic
           // opening through TTS instead of asking the LLM for a system-only
@@ -113,4 +137,41 @@ export async function checkDograhHealth(
     signal: AbortSignal.timeout(3_000),
   })
   return response.ok
+}
+
+async function dograhWorkflowId(
+  env: DograhEnvironment = process.env,
+  request: typeof fetch = fetch,
+) {
+  const configured = optionalInteger('DOGRAH_WORKFLOW_ID', env)
+  if (configured) return configured
+
+  const workflowUuid = required('DOGRAH_WORKFLOW_UUID', env)
+  const workflows = await dograhRequest<Array<{ id: number; uuid?: string; workflow_uuid?: string }>>('/workflow/fetch', {}, env, request)
+  const workflow = workflows.find(item => (item.workflow_uuid || item.uuid) === workflowUuid)
+  if (!workflow) throw new Error(`Dograh workflow ${workflowUuid} was not found`)
+  return workflow.id
+}
+
+export async function listDograhRuns(
+  limit = 25,
+  env: DograhEnvironment = process.env,
+  request: typeof fetch = fetch,
+) {
+  const workflowId = await dograhWorkflowId(env, request)
+  return dograhRequest<{ runs: DograhWorkflowRun[] }>(
+    `/workflow/${workflowId}/runs?limit=${Math.max(1, Math.min(limit, 100))}`,
+    {},
+    env,
+    request,
+  )
+}
+
+export async function getDograhRun(
+  runId: number,
+  env: DograhEnvironment = process.env,
+  request: typeof fetch = fetch,
+) {
+  const workflowId = await dograhWorkflowId(env, request)
+  return dograhRequest<DograhWorkflowRun>(`/workflow/${workflowId}/runs/${runId}`, {}, env, request)
 }

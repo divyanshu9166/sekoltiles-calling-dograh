@@ -27,6 +27,7 @@ export async function getAppointments() {
       date: a.date.toISOString().split('T')[0],
       time: a.time,
       purpose: a.purpose,
+      region: a.region,
       status: a.status.charAt(0) + a.status.slice(1).toLowerCase(),
       notes: a.notes,
     })),
@@ -48,18 +49,19 @@ export async function createAppointment(data: unknown) {
   try {
     const dayStart = new Date(`${normalizedDate}T00:00:00.000Z`)
     const dayEnd = new Date(`${normalizedDate}T23:59:59.999Z`)
-    const existing = await prisma.appointment.findMany({
-      where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
-      select: { time: true },
-    })
-    const requestedMinutes = timeToMinutes(normalizedTime)
-    const conflict = existing.some((item) => {
-      const bookedMinutes = timeToMinutes(item.time)
-      return bookedMinutes !== null && requestedMinutes !== null && Math.abs(bookedMinutes - requestedMinutes) < 60
-    })
-    if (conflict) return { success: false, error: 'That appointment slot is already occupied.' }
-
     const appointment = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${normalizedDate}:${normalizedTime}`}))`
+      const existing = await tx.appointment.findMany({
+        where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
+        select: { time: true },
+      })
+      const requestedMinutes = timeToMinutes(normalizedTime)
+      const conflict = existing.some((item) => {
+        const bookedMinutes = timeToMinutes(item.time)
+        return bookedMinutes !== null && requestedMinutes !== null && Math.abs(bookedMinutes - requestedMinutes) < 60
+      })
+      if (conflict) throw new Error('APPOINTMENT_SLOT_TAKEN')
+
       const contact = await tx.contact.upsert({
         where: { phone: normalizedPhone },
         update: { name: parsed.data.customer.trim() },
@@ -71,6 +73,7 @@ export async function createAppointment(data: unknown) {
           date: new Date(normalizedDate),
           time: normalizedTime,
           purpose: parsed.data.purpose.trim(),
+          region: parsed.data.region?.trim() || null,
           notes: parsed.data.notes?.trim() || 'Booked manually from Call Center',
         },
       })
@@ -79,6 +82,9 @@ export async function createAppointment(data: unknown) {
     revalidatePath('/calls')
     return { success: true, data: { id: appointment.id } }
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'APPOINTMENT_SLOT_TAKEN') {
+      return { success: false, error: 'That appointment slot is already occupied.' }
+    }
     if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002') {
       return { success: false, error: 'That appointment slot was just booked.' }
     }

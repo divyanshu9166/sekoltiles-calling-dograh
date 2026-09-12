@@ -61,7 +61,7 @@ const TABS = [
 const directionFilters = ['All', 'Inbound', 'Outbound'];
 const statusFilters = ['All', 'Completed', 'Missed', 'No Answer', 'Busy'];
 const tagFilters = ['All', 'Hot Lead', 'Warm Lead', 'Cold Lead', 'Customer', 'Unknown'];
-const EMPTY_APPOINTMENT = { customer: '', phone: '', date: '', time: '', purpose: '', notes: '' };
+const EMPTY_APPOINTMENT = { customer: '', phone: '', date: '', time: '', purpose: '', region: '', notes: '' };
 
 export default function CallsPage() {
   const [callLogs, setCallLogs] = useState([]);
@@ -90,6 +90,7 @@ export default function CallsPage() {
   const [outboundPhone, setOutboundPhone] = useState('');
   const [outboundName, setOutboundName] = useState('');
   const [outboundReason, setOutboundReason] = useState('');
+  const [outboundRegion, setOutboundRegion] = useState('');
   const [customReason, setCustomReason] = useState('');
   const [callingState, setCallingState] = useState('idle'); // idle | calling | connected | ended
   const [activeCallLogId, setActiveCallLogId] = useState(null);
@@ -819,6 +820,7 @@ export default function CallsPage() {
       customer: call.customer === 'Unknown Customer' ? '' : call.customer,
       phone: call.phone,
       purpose: call.purpose || '',
+      region: call.region || '',
       notes: call.notes || `Follow-up from call on ${call.date}`,
     }));
     setAppointmentMessage('Call details added. Select the date and time to finish booking.');
@@ -907,6 +909,19 @@ export default function CallsPage() {
               />
             </div>
             <div>
+              <label htmlFor="appointment-region" className="text-sm text-muted mb-1 block">Region / Zone</label>
+              <input
+                id="appointment-region"
+                name="region"
+                type="text"
+                placeholder="e.g. Jaipur, West Zone"
+                value={appointmentForm.region}
+                maxLength={120}
+                onChange={(event) => setAppointmentField('region', event.target.value)}
+                className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
+              />
+            </div>
+            <div>
               <label htmlFor="appointment-notes" className="text-sm text-muted mb-1 block">Notes</label>
               <textarea
                 id="appointment-notes"
@@ -959,6 +974,7 @@ export default function CallsPage() {
                     <span>{appointment.date}</span>
                     <span className="text-right">{appointment.time}</span>
                     <span className="col-span-2 text-muted">{appointment.purpose}</span>
+                    {appointment.region && <span className="col-span-2 text-muted">Region: {appointment.region}</span>}
                   </div>
                   {appointment.status === 'Scheduled' && (
                     <div className="mt-3 flex gap-2">
@@ -1230,7 +1246,7 @@ export default function CallsPage() {
     setCallingState('calling');
     setCallMessage('');
     try {
-      const res = await initiateAICall(outboundPhone, reason, outboundName);
+      const res = await initiateAICall(outboundPhone, reason, outboundName, outboundRegion);
       if (res.success) {
         setCallingState('connected');
         setActiveCallLogId(res.data.callLogId);
@@ -1376,6 +1392,20 @@ export default function CallsPage() {
                   <option value="Order status update">Order status update</option>
                   <option value="Custom reason">Custom reason</option>
                 </select>
+              </div>
+              <div>
+                <label htmlFor="ai-outbound-region" className="text-sm text-muted mb-1 block">Region / Zone</label>
+                <input
+                  id="ai-outbound-region"
+                  name="region"
+                  type="text"
+                  placeholder="e.g. Jaipur, Rajasthan or West Zone"
+                  value={outboundRegion}
+                  maxLength={120}
+                  onChange={(e) => setOutboundRegion(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
+                />
+                <p className="mt-1 text-[11px] text-muted">Passed to Anushka as trusted context for region-specific follow-up.</p>
               </div>
               {outboundReason === 'Custom reason' && (
                 <div>
@@ -1810,6 +1840,13 @@ export default function CallsPage() {
               <p className="text-xs text-muted mb-1">Purpose</p>
               <p className="text-sm text-foreground">{selectedCall.purpose}</p>
             </div>
+
+            {selectedCall.region && (
+              <div className="bg-surface rounded-xl p-3">
+                <p className="text-xs text-muted mb-1">Region / Zone</p>
+                <p className="text-sm text-foreground">{selectedCall.region}</p>
+              </div>
+            )}
 
             <div className="bg-surface rounded-xl p-3">
               <p className="text-xs text-muted mb-1">Notes</p>

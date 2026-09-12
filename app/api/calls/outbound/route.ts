@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 })
     }
-    const { phoneNumber, reason, customerName } = parsed.data
+    const { phoneNumber, reason, customerName, region } = parsed.data
 
     const DOGRAH_API_URL = process.env.DOGRAH_API_URL
     const DOGRAH_API_KEY = process.env.DOGRAH_API_KEY
@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
       phoneNumber,
       reason: reason || 'Follow-up call',
       customerName: customerName || '',
+      region: region || '',
     })
 
     return NextResponse.json({

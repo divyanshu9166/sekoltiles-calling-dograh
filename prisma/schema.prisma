@@ -29,6 +29,7 @@ model Appointment {
   date      DateTime
   time      String
   purpose   String
+  region    String?
   status    String   @default("Scheduled")
   notes     String?
   createdAt DateTime @default(now())
@@ -36,7 +37,7 @@ model Appointment {
 
   @@index([date])
   @@index([status])
-  @@unique([date, time])
+  @@index([date, time])
 }
 
 enum CallDirection {
@@ -68,6 +69,7 @@ model CallLog {
   date          DateTime
   time          String
   purpose       String?
+  region        String?
   outcome       String?
   notes         String?
   recording     Boolean        @default(false)

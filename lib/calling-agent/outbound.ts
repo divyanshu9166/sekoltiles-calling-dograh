@@ -5,10 +5,11 @@ type OutboundCall = {
   phoneNumber: string
   customerName: string
   reason: string
+  region: string
 }
 
 /** Creates the durable CRM record before Dograh asks Vobiz to dial. */
-export async function startOutboundAICall({ phoneNumber, customerName, reason }: OutboundCall) {
+export async function startOutboundAICall({ phoneNumber, customerName, reason, region }: OutboundCall) {
   const now = new Date()
   const contact = await prisma.contact.findUnique({ where: { phone: phoneNumber } })
 
@@ -25,6 +26,7 @@ export async function startOutboundAICall({ phoneNumber, customerName, reason }:
       date: now,
       time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
       purpose: reason,
+      region: region || null,
       outcome: 'Queued in Dograh',
       notes: 'Outbound call requested through Dograh orchestration',
       recording: false,
@@ -38,6 +40,7 @@ export async function startOutboundAICall({ phoneNumber, customerName, reason }:
       phoneNumber,
       customerName,
       reason,
+      region,
       crmCallLogId: callLog.id,
     })
     await prisma.callLog.update({

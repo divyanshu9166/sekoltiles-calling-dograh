@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   let bookingDate: string | null = null
   try {
     const body = await req.json()
-    const { customerName, phone, date: rawDate, time: rawTime, purpose, notes } = body
+    const { customerName, phone, date: rawDate, time: rawTime, purpose, notes, region } = body
 
     if (typeof customerName !== 'string' || !customerName.trim() || !phone || !rawDate || !rawTime) {
       return NextResponse.json({ error: 'customerName, phone, date, and time are required' }, { status: 400 })
@@ -41,22 +41,27 @@ export async function POST(req: NextRequest) {
 
     const dayStart = new Date(`${date}T00:00:00.000Z`)
     const dayEnd = new Date(`${date}T23:59:59.999Z`)
-    const requestedMinutes = timeToMinutes(time)
-    const existingAppointments = await prisma.appointment.findMany({
-      where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
-      select: { time: true },
-    })
-    const isTaken = existingAppointments.some((appointment) => {
-      const bookedMinutes = timeToMinutes(appointment.time)
-      return bookedMinutes !== null && requestedMinutes !== null && Math.abs(bookedMinutes - requestedMinutes) < 60
-    })
-    if (isTaken) return slotTakenResponse(existingAppointments.map((appointment) => appointment.time))
-
     const appointment = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
+      const existingAppointments = await tx.appointment.findMany({
+        where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
+        select: { time: true },
+      })
+      const requestedMinutes = timeToMinutes(time)
+      const isTaken = existingAppointments.some((appointment) => {
+        const bookedMinutes = timeToMinutes(appointment.time)
+        return bookedMinutes !== null && requestedMinutes !== null && Math.abs(bookedMinutes - requestedMinutes) < 60
+      })
+      if (isTaken) {
+        const error = new Error('APPOINTMENT_SLOT_TAKEN') as Error & { bookedTimes?: string[] }
+        error.bookedTimes = existingAppointments.map((appointment) => appointment.time)
+        throw error
+      }
+
       // Upsert prevents an orphaned contact or a duplicate-phone race.
       const contact = await tx.contact.upsert({
         where: { phone: normalizedPhone },
-        update: {},
+        update: { name: customer },
         create: { name: customer, phone: normalizedPhone },
       })
       // The [date,time] database constraint is the final authority if another
@@ -67,6 +72,7 @@ export async function POST(req: NextRequest) {
           date: new Date(date),
           time,
           purpose: appointmentPurpose,
+          region: typeof region === 'string' && region.trim() ? region.trim().slice(0, 120) : null,
           notes: appointmentNotes,
           status: 'Scheduled',
         },
@@ -80,9 +86,13 @@ export async function POST(req: NextRequest) {
         date,
         time,
         purpose: appointment.purpose,
+        region: appointment.region,
       },
     })
   } catch (error: unknown) {
+    if (error instanceof Error && error.message === 'APPOINTMENT_SLOT_TAKEN') {
+      return slotTakenResponse((error as Error & { bookedTimes?: string[] }).bookedTimes || [])
+    }
     if (isUniqueConstraintError(error) && bookingDate) {
       const existing = await prisma.appointment.findMany({
         where: { date: { gte: new Date(`${bookingDate}T00:00:00.000Z`), lte: new Date(`${bookingDate}T23:59:59.999Z`) }, status: { not: 'Cancelled' } },
