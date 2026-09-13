@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { normalizeCustomerPhone } from '@/lib/appointments/booking'
 
 /**
  * POST /api/calls/schedule-callback
@@ -8,20 +9,20 @@ import { prisma } from '@/lib/db'
  */
 export async function POST(req: NextRequest) {
   const apiSecret = req.headers.get('x-api-secret')
-  if (apiSecret !== process.env.CRM_API_SECRET) {
+  if (!process.env.CRM_API_SECRET || apiSecret !== process.env.CRM_API_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
-    const { customerName, phone, preferredTime, reason, region } = await req.json()
+    const { customerName, phone, fallbackPhone, preferredTime, reason, region } = await req.json()
+    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(fallbackPhone)
+    if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once and retry using fallbackPhone.' })
     if (
       typeof customerName !== 'string' || !customerName.trim() ||
-      typeof phone !== 'string' || !/^\+[1-9]\d{7,14}$/.test(phone.replace(/[\s().-]/g, '')) ||
       typeof preferredTime !== 'string' || !preferredTime.trim()
     ) {
-      return NextResponse.json({ error: 'customerName, E.164 phone, and preferredTime are required' }, { status: 400 })
+      return NextResponse.json({ success: false, code: 'MISSING_DETAILS', error: 'Ask only for the missing customer name or preferred callback time.' })
     }
-    const normalizedPhone = phone.replace(/[\s().-]/g, '')
 
     // Try to link to existing contact
     const contact = await prisma.contact.findFirst({ where: { phone: normalizedPhone } })

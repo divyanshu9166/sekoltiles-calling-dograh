@@ -70,12 +70,24 @@ function stringParameter(name, description, required = true) {
 const credentialUuid = await upsertCredential()
 
 const commonAppointmentParameters = [
-  stringParameter('date', 'Resolved appointment date in YYYY-MM-DD format. Never guess the month or year.'),
+  stringParameter('date', 'Resolved date YYYY-MM-DD using get_booking_calendar. Optional for today/tomorrow: the server resolves spokenDate. Never invent a year.', false),
   stringParameter('spokenDate', 'Customer original date words exactly as spoken, such as “कल 13 तारीख” or “Monday 14 September”.'),
   stringParameter('time', 'Confirmed India-time slot: 10:00 AM, 11:00 AM, 12:00 PM, 2:00 PM, 3:00 PM, 4:00 PM, or 5:00 PM.'),
-  stringParameter('purpose', 'Short confirmed purpose for the showroom appointment.'),
+  stringParameter('purpose', 'Purpose already mentioned by the customer. Default showroom visit; do not ask again.', false),
   stringParameter('notes', 'Optional useful details from the conversation. Do not include invented information.', false),
 ]
+
+const calendarUuid = await upsertTool({
+  name: 'get_booking_calendar',
+  description: 'Read the current India date and next 14 business days. Use once when booking needs a date reference (especially inbound). No customer details required. Does not book or reserve a slot.',
+  category: 'http_api',
+  icon: 'calendar',
+  icon_color: '#0F766E',
+  definition: { schema_version: 1, type: 'http_api', config: {
+    method: 'GET', url: `${crmPublicUrl}/api/appointments/calendar`, credential_uuid: credentialUuid,
+    parameters: [], timeout_ms: 5000,
+  } },
+})
 
 const outboundAppointmentUuid = await upsertTool({
   name: 'book_outbound_appointment',
@@ -116,10 +128,11 @@ const inboundAppointmentUuid = await upsertTool({
       credential_uuid: credentialUuid,
       parameters: [
         stringParameter('customerName', 'Customer full name stated by the inbound caller.'),
+        stringParameter('fallbackPhone', 'Only if caller ID is unavailable or booking returned INVALID_PHONE: contact number explicitly provided by the caller. Never invent one.', false),
         ...commonAppointmentParameters,
       ],
       preset_parameters: [
-        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: true },
+        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
       ],
       timeout_ms: 10_000,
     },
@@ -170,10 +183,11 @@ const inboundCallbackUuid = await upsertTool({
       credential_uuid: credentialUuid,
       parameters: [
         stringParameter('customerName', 'Customer full name stated by the inbound caller.'),
+        stringParameter('fallbackPhone', 'Contact number explicitly supplied by the caller only when caller ID is unavailable.', false),
         ...commonCallbackParameters,
       ],
       preset_parameters: [
-        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: true },
+        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
       ],
       timeout_ms: 10_000,
     },
@@ -253,6 +267,7 @@ const definition = {
         delayed_start: false,
         extraction_enabled: false,
         tool_uuids: [
+          calendarUuid,
           outboundAppointmentUuid,
           inboundAppointmentUuid,
           outboundCallbackUuid,

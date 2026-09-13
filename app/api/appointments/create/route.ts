@@ -9,6 +9,7 @@ import {
   resolveAppointmentDate,
   timeToMinutes,
   APPOINTMENT_SLOTS,
+  isPastAppointmentSlot,
 } from '@/lib/appointments/booking'
 
 /**
@@ -17,22 +18,22 @@ import {
  */
 export async function POST(req: NextRequest) {
   const apiSecret = req.headers.get('x-api-secret')
-  if (apiSecret !== process.env.CRM_API_SECRET) {
+  if (!process.env.CRM_API_SECRET || apiSecret !== process.env.CRM_API_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   let bookingDate: string | null = null
   try {
     const body = await req.json()
-    const { customerName, phone, date: rawDate, spokenDate, time: rawTime, purpose, notes, region } = body
+    const { customerName, phone, fallbackPhone, date: rawDate, spokenDate, time: rawTime, purpose, notes, region } = body
 
-    if (typeof customerName !== 'string' || !customerName.trim() || !phone || !rawDate || !rawTime) {
-      return NextResponse.json({ success: false, error: 'customerName, phone, date, and time are required' })
+    if (typeof customerName !== 'string' || !customerName.trim() || (!rawDate && !spokenDate) || !rawTime) {
+      return NextResponse.json({ success: false, code: 'MISSING_DETAILS', error: 'Ask only for the missing customer name, date or time. Do not repeat details already collected.' })
     }
     const today = indiaDateString()
     const date = resolveAppointmentDate(rawDate, spokenDate, today)
     const time = normalizeAppointmentTime(rawTime)
-    const normalizedPhone = normalizeCustomerPhone(phone)
+    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(fallbackPhone)
     if (!date) {
       return NextResponse.json({
         success: false,
@@ -61,7 +62,10 @@ export async function POST(req: NextRequest) {
       })
     }
     if (!normalizedPhone) {
-      return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'The supplied caller phone is invalid.' })
+      return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Caller ID is unavailable. Ask for a contact number once and retry with fallbackPhone; keep the other booking details.' })
+    }
+    if (isPastAppointmentSlot(date, time)) {
+      return NextResponse.json({ success: false, code: 'PAST_SLOT', error: 'That time has already passed in India. Ask for a future slot.', currentIndiaDate: today, availableSlots: APPOINTMENT_SLOTS.filter(slot => !isPastAppointmentSlot(date, slot)), nextOpenDate: nextOpenAppointmentDate(date) })
     }
     bookingDate = date
     const customer = customerName.trim().slice(0, 120)
@@ -76,8 +80,12 @@ export async function POST(req: NextRequest) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
       const existingAppointments = await tx.appointment.findMany({
         where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
-        select: { time: true },
+        include: { contact: { select: { phone: true } } },
       })
+      // A tool timeout can happen after commit. Repeating the same booking must
+      // return the saved ID instead of making a duplicate or claiming a conflict.
+      const sameBooking = existingAppointments.find(item => item.time === time && item.contact.phone === normalizedPhone && item.purpose === appointmentPurpose)
+      if (sameBooking) return sameBooking
       const requestedMinutes = timeToMinutes(time)
       const isTaken = existingAppointments.some((appointment) => {
         const bookedMinutes = timeToMinutes(appointment.time)
@@ -95,8 +103,7 @@ export async function POST(req: NextRequest) {
         update: { name: customer },
         create: { name: customer, phone: normalizedPhone },
       })
-      // The [date,time] database constraint is the final authority if another
-      // request passes the availability check at the same moment.
+      // The transaction advisory lock serializes requests for this fixed slot.
       return tx.appointment.create({
         data: {
           contactId: contact.id,
@@ -108,7 +115,7 @@ export async function POST(req: NextRequest) {
           status: 'Scheduled',
         },
       })
-    })
+    }, { maxWait: 1500, timeout: 4000 })
 
     return NextResponse.json({
       success: true,
@@ -122,23 +129,24 @@ export async function POST(req: NextRequest) {
     })
   } catch (error: unknown) {
     if (error instanceof Error && error.message === 'APPOINTMENT_SLOT_TAKEN') {
-      return slotTakenResponse((error as Error & { bookedTimes?: string[] }).bookedTimes || [])
+      return slotTakenResponse((error as Error & { bookedTimes?: string[] }).bookedTimes || [], bookingDate)
     }
     if (isUniqueConstraintError(error) && bookingDate) {
       const existing = await prisma.appointment.findMany({
         where: { date: { gte: new Date(`${bookingDate}T00:00:00.000Z`), lte: new Date(`${bookingDate}T23:59:59.999Z`) }, status: { not: 'Cancelled' } },
         select: { time: true },
       })
-      return slotTakenResponse(existing.map((appointment) => appointment.time))
+      return slotTakenResponse(existing.map((appointment) => appointment.time), bookingDate)
     }
     console.error('Failed to create appointment:', error)
-    return NextResponse.json({ error: 'Failed to create appointment' }, { status: 500 })
+    return NextResponse.json({ success: false, code: 'BOOKING_UNAVAILABLE', error: 'Booking could not be confirmed. Tell the caller briefly; retry the same details once. If it fails again, offer a human transfer or callback with consent.' }, { status: 500 })
   }
 }
 
-function slotTakenResponse(bookedTimes: string[]) {
+function slotTakenResponse(bookedTimes: string[], date: string | null) {
   const bookedMinutes = bookedTimes.map(timeToMinutes).filter((minutes): minutes is number => minutes !== null)
   const suggestions = APPOINTMENT_SLOTS.filter((slot) => {
+    if (date && isPastAppointmentSlot(date, slot)) return false
     const slotMinutes = timeToMinutes(slot)
     return slotMinutes !== null && !bookedMinutes.some((booked) => Math.abs(booked - slotMinutes) < 60)
   }).slice(0, 4)

@@ -66,14 +66,16 @@ export function resolveAppointmentDate(
 ): string | null {
   if (typeof spokenDate === 'string') {
     const phrase = spokenDate.trim().toLocaleLowerCase('en-IN')
-    if (phrase.includes('tomorrow') || phrase.includes('कल') || /(^|\s)kal($|\s)/i.test(phrase)) {
+    if (/yesterday|बीते|बीता|पिछले/.test(phrase)) return null
+    if (/day after tomorrow|परसों|parso[n]?/.test(phrase)) return addIndiaCalendarDays(today, 2)
+    if (/\btomorrow\b|(^|\s)कल(?=$|\s)|(^|\s)kal(?=$|\s)/i.test(phrase)) {
       return addIndiaCalendarDays(today, 1)
     }
     if (phrase.includes('today') || phrase.includes('आज') || /(^|\s)aaj($|\s)/i.test(phrase)) {
       return today
     }
   }
-  return normalizeAppointmentDate(generatedDate, today)
+  return normalizeAppointmentDate(generatedDate, today) || normalizeAppointmentDate(spokenDate, today)
 }
 
 /** Returns the fixed slot label; supports 24-hour input from HTML time fields. */
@@ -108,7 +110,17 @@ export function timeToMinutes(value: string): number | null {
 
 export function normalizeCustomerPhone(value: unknown): string | null {
   if (typeof value !== 'string') return null
-  const phone = value.replace(/[\s().-]/g, '')
+  let phone = value.replace(/[\s().-]/g, '')
+  // ARI preserves carrier caller ID, which commonly omits the leading +.
+  if (/^91[6-9]\d{9}$/.test(phone)) phone = `+${phone}`
+  else if (/^[6-9]\d{9}$/.test(phone)) phone = `+91${phone}`
+  else if (/^0091[6-9]\d{9}$/.test(phone)) phone = `+${phone.slice(2)}`
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) return null
   return phone.startsWith('+91') && !/^\+91[6-9]\d{9}$/.test(phone) ? null : phone
+}
+
+export function isPastAppointmentSlot(date: string, time: string, now = new Date()): boolean {
+  const minutes = timeToMinutes(time)
+  if (minutes === null) return true
+  return new Date(`${date}T00:00:00+05:30`).getTime() + minutes * 60_000 <= now.getTime()
 }

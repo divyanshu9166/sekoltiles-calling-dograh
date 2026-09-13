@@ -7,6 +7,7 @@ import {
   isSundayAppointmentDate,
   nextOpenAppointmentDate,
   timeToMinutes,
+  isPastAppointmentSlot,
 } from '@/lib/appointments/booking'
 
 /**
@@ -27,7 +28,7 @@ import {
 
 export async function GET(req: NextRequest) {
   const apiSecret = req.headers.get('x-api-secret')
-  if (apiSecret !== process.env.CRM_API_SECRET) {
+  if (!process.env.CRM_API_SECRET || apiSecret !== process.env.CRM_API_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -62,6 +63,7 @@ export async function GET(req: NextRequest) {
     )
   }
   const requestedMinutes = timeToMinutes(time)
+  if (isPastAppointmentSlot(date, time)) return NextResponse.json({ available: false, reason: 'PAST_SLOT', suggestions: APPOINTMENT_SLOTS.filter(slot => !isPastAppointmentSlot(date, slot)) })
   if (requestedMinutes === null) return NextResponse.json({ error: 'Invalid appointment time.' }, { status: 400 })
 
   try {
@@ -94,6 +96,7 @@ export async function GET(req: NextRequest) {
     )
 
     const suggestions = APPOINTMENT_SLOTS.filter((slot) => {
+      if (isPastAppointmentSlot(date, slot)) return false
       const slotMin = timeToMinutes(slot)
       if (slotMin === null) return false
       return !Array.from(bookedMinutes).some(
