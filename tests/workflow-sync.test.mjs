@@ -58,6 +58,8 @@ test('sync publishes compact customer tools without replacing chosen models or t
     assert.match(start.data.prompt, /campaign_rules/)
     assert.match(start.data.prompt, /call end_call immediately/)
     assert.match(start.data.prompt, /immediately call transfer_to_human/)
+    assert.match(start.data.prompt, /CATALOGUE FOLLOW-UP/)
+    assert.match(start.data.prompt, /मैंने आपकी कैटलॉग रिक्वेस्ट नोट कर ली है/)
     assert.ok(start.data.prompt.length < 7_000, `prompt is ${start.data.prompt.length} chars`)
     assert.ok(JSON.stringify(tools).length < 9_000, 'attached tool schemas must remain compact')
     const booking = tools.find(t => t.name === 'customer_action').definition.config

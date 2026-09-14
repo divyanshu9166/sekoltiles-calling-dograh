@@ -1,4 +1,5 @@
 import { buildSekolDograhPrompt, DEFAULT_HUMAN_HANDOFF_NUMBER } from '../lib/calling-agent/prompt.mjs'
+import pg from 'pg'
 
 const rawBase = process.env.DOGRAH_API_URL?.trim().replace(/\/+$/, '')
 const apiKey = process.env.DOGRAH_API_KEY?.trim()
@@ -8,6 +9,21 @@ const crmPublicUrl = (process.env.CRM_PUBLIC_URL || '').trim().replace(/\/+$/, '
 const explicitHandoffNumber = process.env.CALL_TRANSFER_NUMBER?.trim()
 const isAriTelephony = process.env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() === 'ari'
 const ariTrunkEndpoint = process.env.DOGRAH_ARI_TRUNK_ENDPOINT?.trim()
+
+async function savedTransferNumber() {
+  if (!process.env.DATABASE_URL) return null
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 2_000 })
+  try {
+    await client.connect()
+    const result = await client.query('SELECT "transferPhone" FROM "AdminUser" ORDER BY "id" ASC LIMIT 1')
+    return typeof result.rows[0]?.transferPhone === 'string' ? result.rows[0].transferPhone.trim() : null
+  } catch (error) {
+    console.warn('Could not load the dashboard transfer number; using CALL_TRANSFER_NUMBER fallback.', error.message)
+    return null
+  } finally {
+    await client.end().catch(() => {})
+  }
+}
 
 for (const [name, value] of Object.entries({
   DOGRAH_API_URL: rawBase,
@@ -123,7 +139,8 @@ if (!workflow) throw new Error(`Workflow UUID ${workflowUuid} was not found`)
 const current = await api(`/workflow/fetch/${workflow.id}`)
 const existingPrompt = current.workflow_definition?.nodes?.find((node) => node.type === 'startCall')?.data?.prompt || ''
 const promptHandoffNumber = existingPrompt.match(/configured human handoff number\s+(\+[0-9 ()-]{7,})/i)?.[1]
-const humanHandoffNumber = (explicitHandoffNumber || promptHandoffNumber || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
+const dashboardHandoffNumber = await savedTransferNumber()
+const humanHandoffNumber = (dashboardHandoffNumber || explicitHandoffNumber || promptHandoffNumber || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
 if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
   throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
 }

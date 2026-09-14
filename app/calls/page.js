@@ -1291,8 +1291,8 @@ export default function CallsPage() {
             <PhoneForwarded className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-foreground">Human escalation settings</h2>
-            <p className="text-sm text-muted mt-1">Choose the human-team number Anushka gives to callers who need immediate assistance.</p>
+            <h2 className="text-lg font-semibold text-foreground">Live human transfer settings</h2>
+            <p className="text-sm text-muted mt-1">Choose the number Anushka uses when a caller agrees to speak with your human team.</p>
           </div>
         </div>
         <form onSubmit={handleCallHandlingSubmit} className="space-y-4">
@@ -1308,16 +1308,16 @@ export default function CallsPage() {
               required
               className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent"
             />
-            <span className="block text-xs text-muted mt-1.5">Use international E.164 format, including the country code.</span>
+            <span className="block text-xs text-muted mt-1.5">Use international E.164 format, including the country code. This dashboard value is saved and survives future deployments.</span>
           </label>
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
-            This Vobiz + Dograh streaming setup cannot perform a bridged live transfer. Anushka shares this number immediately, and records a callback only when the caller agrees. A true live transfer requires moving inbound telephony to a Dograh-supported transfer provider or an Asterisk ARI/SIP-trunk architecture.
+            Saving this updates the active Dograh/Asterisk transfer destination immediately. The value here is the source of truth; the .env number is only used if no dashboard value exists yet.
           </div>
           {callHandlingError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{callHandlingError}</p>}
           {callHandlingMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{callHandlingMessage}</p>}
           <button type="submit" disabled={callHandlingLoading} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60 flex items-center gap-2">
             {callHandlingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
-            {callHandlingLoading ? 'Publishing…' : 'Save escalation number'}
+            {callHandlingLoading ? 'Publishing…' : 'Save transfer number'}
           </button>
         </form>
       </div>
