@@ -16,6 +16,7 @@ from pipecat.services.groq.llm import GroqLLMService
 
 
 DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b"
+DEFAULT_FALLBACK_MAX_COMPLETION_TOKENS = 512
 RETRYABLE_STATUS_CODES = {408, 409, 429}
 
 
@@ -71,6 +72,18 @@ class FallbackGroqLLMService(GroqLLMService):
         self._fallback_active = self._primary_model == self._fallback_model
         self._primary_requests = 0
         try:
+            self._fallback_max_completion_tokens = max(
+                256,
+                int(
+                    os.getenv(
+                        "DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS",
+                        str(DEFAULT_FALLBACK_MAX_COMPLETION_TOKENS),
+                    )
+                ),
+            )
+        except ValueError:
+            self._fallback_max_completion_tokens = DEFAULT_FALLBACK_MAX_COMPLETION_TOKENS
+        try:
             self._primary_request_limit = max(
                 1, int(os.getenv("DOGRAH_GROQ_PRIMARY_MAX_REQUESTS", "3"))
             )
@@ -80,6 +93,17 @@ class FallbackGroqLLMService(GroqLLMService):
     def _set_fallback(self, reason: str) -> None:
         self._fallback_active = True
         self._settings.model = self._fallback_model
+        # GPT-OSS reasoning and function arguments share the completion budget.
+        # The primary voice model only needs 192 tokens, but that cap can cut a
+        # fallback tool call mid-JSON. Low reasoning plus 512 tokens leaves room
+        # for valid arguments without making the spoken response longer.
+        self._settings.max_completion_tokens = self._fallback_max_completion_tokens
+        self._settings.extra = {
+            **self._settings.extra,
+            "reasoning_effort": "low",
+            "include_reasoning": False,
+            "parallel_tool_calls": False,
+        }
         self.set_full_model_name(self._fallback_model)
         logger.warning(
             "Switching Groq model from {} to {} ({})",

@@ -10,6 +10,7 @@ services:
       - "host.docker.internal:172.18.0.1"
     environment:
       DOGRAH_GROQ_FALLBACK_MODEL: ${DOGRAH_GROQ_FALLBACK_MODEL:-openai/gpt-oss-20b}
+      DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS: ${DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS:-512}
       DOGRAH_GROQ_PRIMARY_MAX_REQUESTS: ${DOGRAH_GROQ_PRIMARY_MAX_REQUESTS:-3}
     volumes:
       - ./groq_model_fallback.py:/app/api/services/pipecat/groq_model_fallback.py:ro
