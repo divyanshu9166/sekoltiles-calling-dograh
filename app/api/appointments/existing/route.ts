@@ -16,6 +16,9 @@ export async function POST(req: NextRequest) {
       where: { contact: { phone: normalizedPhone }, status: 'Scheduled', date: { gte: new Date(`${today}T00:00:00Z`) } },
       select: { id: true, date: true, time: true },
       orderBy: [{ date: 'asc' }, { id: 'asc' }],
+      // A caller should never accumulate many active bookings, but bounding
+      // the read keeps this real-time voice tool predictable on dirty data.
+      take: 10,
     })
     const appointments = rows.map(row => ({ ...row, date: row.date.toISOString().slice(0, 10) }))
       .filter(row => !isPastAppointmentSlot(row.date, row.time, now))

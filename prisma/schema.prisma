@@ -38,6 +38,8 @@ model Appointment {
   @@index([date])
   @@index([status])
   @@index([date, time])
+  @@index([contactId, status, date])
+  @@index([date, status])
 }
 
 enum CallDirection {

@@ -31,6 +31,8 @@ test('lookup scopes query to caller and active future bookings; never treats an 
     const result = await (await module.exports.POST(request())).json()
     assert.equal(query.where.contact.phone, '+919166623128')
     assert.equal(query.where.status, 'Scheduled')
+    assert.equal(query.take, 10)
+    assert.deepEqual(query.select, { id: true, date: true, time: true })
     assert.equal(result.hasAppointment, true)
     assert.deepEqual(result.appointments.map(a => a.id), [2])
     const invalid = await (await module.exports.POST(request('test-only', 'unknown'))).json()

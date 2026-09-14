@@ -80,7 +80,9 @@ export async function POST(req: NextRequest) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${normalizedPhone}`}))`
       const upcoming = await tx.appointment.findMany({
         where: { contact: { phone: normalizedPhone }, status: 'Scheduled', date: { gte: new Date(`${today}T00:00:00Z`) } },
+        select: { id: true, date: true, time: true, purpose: true, region: true },
         orderBy: { date: 'asc' },
+        take: 10,
       })
       const existingForCaller = upcoming.find(row => !isPastAppointmentSlot(row.date.toISOString().slice(0, 10), row.time))
       if (existingForCaller) {
@@ -92,12 +94,8 @@ export async function POST(req: NextRequest) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
       const existingAppointments = await tx.appointment.findMany({
         where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
-        include: { contact: { select: { phone: true } } },
+        select: { time: true },
       })
-      // A tool timeout can happen after commit. Repeating the same booking must
-      // return the saved ID instead of making a duplicate or claiming a conflict.
-      const sameBooking = existingAppointments.find(item => item.time === time && item.contact.phone === normalizedPhone && item.purpose === appointmentPurpose)
-      if (sameBooking) return sameBooking
       const requestedMinutes = timeToMinutes(time)
       const isTaken = existingAppointments.some((appointment) => {
         const bookedMinutes = timeToMinutes(appointment.time)
