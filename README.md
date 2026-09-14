@@ -38,12 +38,16 @@ The command is idempotent and preserves the model and telephony settings selecte
 
 LiveKit is not part of this project. Voice orchestration is exclusively handled by the separately deployed Dograh instance.
 
-For the VPS deployment, copy `deploy/dograh/docker-compose.override.yaml` beside
-Dograh's generated `docker-compose.yaml`, validate it with `docker compose config`,
-and recreate the Dograh API service. The override gives Dograh access to the CRM
-through the Linux host gateway and applies the Groq Qwen completion limit used by
-the published Sekol workflow. Provider credentials remain in Dograh's dashboard
-and must never be committed to this repository.
+For the VPS deployment, copy both `deploy/dograh/docker-compose.override.yaml`
+and `deploy/dograh/groq_model_fallback.py` beside Dograh's generated
+`docker-compose.yaml`, validate it with `docker compose config`, and recreate the
+Dograh API service. The override gives Dograh access to the CRM through the Linux
+host gateway, applies the Groq completion limit, and keeps the model selected in
+Dograh as primary. Before any response chunk has been emitted, an HTTP 429,
+timeout, connection failure, or Groq 5xx switches that call to
+`DOGRAH_GROQ_FALLBACK_MODEL` (default `openai/gpt-oss-20b`) for its remaining
+turns. It never replays a partially emitted response. Provider credentials remain
+in Dograh's dashboard and must never be committed to this repository.
 
 ## VPS sizing
 
