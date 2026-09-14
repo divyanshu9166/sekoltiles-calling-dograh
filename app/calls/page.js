@@ -69,7 +69,7 @@ const directionFilters = ['All', 'Inbound', 'Outbound'];
 const statusFilters = ['All', 'Completed', 'Missed', 'No Answer', 'Busy'];
 const tagFilters = ['All', 'Hot Lead', 'Warm Lead', 'Cold Lead', 'Customer', 'Unknown'];
 const EMPTY_APPOINTMENT = { customer: '', phone: '', date: '', time: '', purpose: '', region: '', notes: '' };
-const DEFAULT_CAMPAIGN_INSTRUCTIONS = 'Introduce the 12x18 and 12x24 tile range. Ask which size the customer requires, whether they want the catalog, and whether they want a showroom visit. If they want to visit, offer to book an appointment.';
+const DEFAULT_CAMPAIGN_INSTRUCTIONS = 'बारह-अठारह और बारह-चौबीस टाइल्स की जानकारी दें। ग्राहक से जरूरी साइज़ पूछें। चुने हुए region/zone के हिसाब से सही price बताएं, फिर पूछें कि इसी नंबर पर catalogue शेयर करें या showroom visit करना चाहेंगे। Visit के लिए appointment offer करें।';
 
 export default function CallsPage() {
   const [callLogs, setCallLogs] = useState([]);
