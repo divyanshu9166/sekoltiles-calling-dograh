@@ -50,6 +50,7 @@ test('sync publishes compact customer tools without replacing chosen models or t
     assert.match(start.data.prompt, /Delhi\/Punjab\/Haryana: 12x18 = ₹160; 12x24 = ₹200/)
     assert.match(start.data.prompt, /SPOKEN SIZE RULE \(strict\)/)
     assert.match(start.data.prompt, /selected CRM lead zone/)
+    assert.match(start.data.prompt, /introduce BOTH sizes first/)
     assert.match(start.data.prompt, /sales campaign is not automatically an offer/)
     assert.match(start.data.prompt, /otherwise ask region before price/)
     assert.match(start.data.prompt, /If hasAppointment=true/)
