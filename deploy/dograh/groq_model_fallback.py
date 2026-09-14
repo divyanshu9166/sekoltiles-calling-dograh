@@ -101,7 +101,6 @@ class FallbackGroqLLMService(GroqLLMService):
         self._settings.extra = {
             **self._settings.extra,
             "reasoning_effort": "low",
-            "include_reasoning": False,
             "parallel_tool_calls": False,
         }
         self.set_full_model_name(self._fallback_model)
