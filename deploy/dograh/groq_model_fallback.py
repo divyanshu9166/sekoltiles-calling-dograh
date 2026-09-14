@@ -48,6 +48,19 @@ def _is_retryable_model_error(exc: Exception) -> bool:
 class FallbackGroqLLMService(GroqLLMService):
     """Groq service that fails over once, without replaying partial speech."""
 
+    def create_client(
+        self, api_key: str | None = None, base_url: str | None = None, **kwargs: Any
+    ) -> Any:
+        """Create a fail-fast client so model fallback is not hidden by SDK retries.
+
+        The OpenAI-compatible SDK automatically retries rate limits and honours
+        Groq's Retry-After header. On a voice call that can leave the caller in
+        silence for 10-20 seconds before this service ever receives the 429.
+        Fallback is the retry policy here, so the SDK itself must not retry.
+        """
+        client = super().create_client(api_key, base_url, **kwargs)
+        return client.with_options(max_retries=0)
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._primary_model = self._settings.model
