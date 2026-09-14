@@ -82,9 +82,22 @@ model CallLog {
   callType      String?        @default("manual")
   aiHandled     Boolean        @default(false)
   transcript    CallTranscript?
+  catalogueRequest CatalogueRequest?
 
   @@index([date])
   @@index([contactId])
+}
+
+model CatalogueRequest {
+  id        Int      @id @default(autoincrement())
+  callLogId Int      @unique
+  callLog   CallLog  @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+  customer  String
+  phone     String
+  region    String?
+  requestedAt DateTime @default(now())
+
+  @@index([requestedAt])
 }
 
 model CallTranscript {

@@ -53,6 +53,7 @@ import Modal from '@/components/Modal';
 import ThemeToggle from '@/components/ThemeToggle';
 import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
 import { createAppointment, getAppointments, updateAppointmentStatus } from '@/app/actions/appointments';
+import { getCatalogueRequests } from '@/app/actions/catalogue';
 
 const TABS = [
   { id: 'ai-caller', label: 'AI Caller', icon: Bot },
@@ -60,6 +61,7 @@ const TABS = [
   { id: 'logs', label: 'Call Logs', icon: Phone },
   { id: 'phonebook', label: 'Phone Book', icon: BookOpen },
   { id: 'transcripts', label: 'Transcripts', icon: MessageSquare },
+  { id: 'catalogue', label: 'Catalogue Requests', icon: FileText },
   { id: 'appointments', label: 'Appointments', icon: CalendarPlus },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -85,6 +87,7 @@ export default function CallsPage() {
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [expandedTranscript, setExpandedTranscript] = useState(null);
   const [appointments, setAppointments] = useState([]);
+  const [catalogueRequests, setCatalogueRequests] = useState([]);
   const [appointmentForm, setAppointmentForm] = useState(EMPTY_APPOINTMENT);
   const [appointmentLoading, setAppointmentLoading] = useState(false);
   const [appointmentMessage, setAppointmentMessage] = useState('');
@@ -138,6 +141,12 @@ export default function CallsPage() {
     });
   };
 
+  const refreshCatalogueRequests = () => {
+    getCatalogueRequests().then(res => {
+      if (res.success) setCatalogueRequests(res.data);
+    });
+  };
+
   const refreshCampaigns = async () => {
     const response = await fetch('/api/campaigns', { cache: 'no-store' });
     const result = await response.json();
@@ -174,6 +183,7 @@ export default function CallsPage() {
       if (res.success) setAgentStatus(res.data);
     });
     refreshAppointments();
+    refreshCatalogueRequests();
   }, []);
 
   // Auto-refresh while either calling mode is active.
@@ -204,6 +214,10 @@ export default function CallsPage() {
 
   useEffect(() => {
     if (activeTab === 'appointments') refreshAppointments();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'catalogue') refreshCatalogueRequests();
   }, [activeTab]);
 
   useEffect(() => {
@@ -1230,6 +1244,45 @@ export default function CallsPage() {
     );
   };
 
+  const renderCatalogueRequests = () => (
+    <div className="max-w-4xl space-y-5">
+      <div className="glass-card p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Catalogue Requests</h2>
+              <p className="text-sm text-muted mt-1">Leads who explicitly requested a catalogue during an AI call. Share the catalogue manually from WhatsApp.</p>
+            </div>
+          </div>
+          <button type="button" onClick={refreshCatalogueRequests} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground">Refresh</button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {catalogueRequests.length === 0 ? (
+          <div className="glass-card p-10 text-center text-sm text-muted">No catalogue requests saved yet. They appear automatically after a completed call transcript contains an explicit catalogue request.</div>
+        ) : catalogueRequests.map((request) => (
+          <div key={request.id} className="glass-card p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold text-foreground">{request.customer}</h3>
+                  <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">CATALOGUE REQUESTED</span>
+                </div>
+                <p className="mt-1 text-sm text-muted">{request.phone}</p>
+                {request.region && <p className="mt-1 text-xs text-muted">Region / Zone: {request.region}</p>}
+              </div>
+              <span className="text-right text-xs text-muted">{request.requestedAt}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   const renderSettings = () => (
     <div className="max-w-2xl space-y-5">
       <div className="glass-card p-5 sm:p-6">
@@ -2179,6 +2232,7 @@ export default function CallsPage() {
       {activeTab === 'logs' && renderCallLogs()}
       {activeTab === 'phonebook' && renderPhoneBook()}
       {activeTab === 'transcripts' && renderTranscripts()}
+      {activeTab === 'catalogue' && renderCatalogueRequests()}
       {activeTab === 'appointments' && renderBookAppointment()}
       {activeTab === 'analytics' && renderAnalytics()}
       {activeTab === 'settings' && renderSettings()}

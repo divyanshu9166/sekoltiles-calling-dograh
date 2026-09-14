@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import type { CallStatus, Prisma } from '@prisma/client'
+import { requestedCatalogue } from '@/lib/catalogue/detection.mjs'
 
 function toStatus(value: unknown): CallStatus {
   const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_')
@@ -154,6 +155,25 @@ export async function POST(req: NextRequest) {
           messages,
         },
       })
+
+      // Catalogue delivery remains manual. We only save an explicit customer request
+      // from the completed transcript, without changing the live agent conversation.
+      if (requestedCatalogue(messages)) {
+        await prisma.catalogueRequest.upsert({
+          where: { callLogId: callLog.id },
+          update: {
+            customer: callLog.customerName,
+            phone: callLog.phone,
+            region: callLog.region,
+          },
+          create: {
+            callLogId: callLog.id,
+            customer: callLog.customerName,
+            phone: callLog.phone,
+            region: callLog.region,
+          },
+        })
+      }
     }
 
     return NextResponse.json({ success: true, data: { id: callLog.id } })
