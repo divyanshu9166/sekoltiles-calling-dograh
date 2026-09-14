@@ -217,7 +217,8 @@ async function dialLead(lead) {
           region: lead.region || '',
           reason: `Bulk campaign: ${lead.campaign.name}`,
           campaign_name: lead.campaign.name,
-          campaign_instructions: lead.campaign.instructions,
+          // Bound legacy campaigns created before the UI/API token guard.
+          campaign_instructions: lead.campaign.instructions.slice(0, 2000),
           campaign_id: lead.campaign.id,
           campaign_lead_id: lead.id,
           crm_call_log_id: callLog.id,

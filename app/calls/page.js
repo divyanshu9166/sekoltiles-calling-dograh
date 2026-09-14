@@ -1380,10 +1380,10 @@ export default function CallsPage() {
               <span className="block text-sm font-medium text-foreground mb-1.5">Agent prompt / campaign instructions</span>
               <textarea
                 value={campaignForm.instructions}
+                maxLength={2000}
                 onChange={(event) => setCampaignForm((current) => ({ ...current, instructions: event.target.value }))}
                 rows={6}
                 minLength={10}
-                maxLength={6000}
                 required
                 placeholder="Tell Anushka what to say, which questions to ask, what confirmation to collect, and whether to offer an appointment."
                 className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y"
@@ -1498,7 +1498,7 @@ export default function CallsPage() {
                     <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Campaign name</span><input value={campaignEdit.name} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, name: event.target.value })); }} maxLength={120} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent" /></label>
                     <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Call gap</span><select value={campaignEdit.interCallDelaySec} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, interCallDelaySec: Number(event.target.value) })); }} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>1 minute</option></select></label>
                   </div>
-                  <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Agent prompt / instructions</span><textarea value={campaignEdit.instructions} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, instructions: event.target.value })); }} rows={5} minLength={10} maxLength={6000} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y" /></label>
+                  <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Agent prompt / instructions</span><textarea value={campaignEdit.instructions} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, instructions: event.target.value })); }} rows={5} minLength={10} maxLength={2000} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y" /></label>
                   <button type="submit" disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-sm font-medium text-accent disabled:opacity-50">Save instructions</button>
                 </form>
 

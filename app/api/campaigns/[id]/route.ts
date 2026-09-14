@@ -37,8 +37,8 @@ export async function PATCH(request: NextRequest, context: CampaignRouteContext)
     if (name.length < 3 || name.length > 120) {
       return NextResponse.json({ success: false, error: 'Campaign name must be 3–120 characters.' }, { status: 400 })
     }
-    if (instructions.length < 10 || instructions.length > 6000) {
-      return NextResponse.json({ success: false, error: 'Campaign instructions must be 10–6000 characters.' }, { status: 400 })
+    if (instructions.length < 10 || instructions.length > 2000) {
+      return NextResponse.json({ success: false, error: 'Campaign instructions must be 10–2000 characters.' }, { status: 400 })
     }
     const interCallDelaySec = Number.isFinite(delayValue) ? Math.max(5, Math.min(300, Math.round(delayValue))) : 15
     const campaign = await prisma.marketingCampaign.update({
