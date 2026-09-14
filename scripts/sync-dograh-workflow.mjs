@@ -69,6 +69,21 @@ function stringParameter(name, description, required = true) {
 
 const credentialUuid = await upsertCredential()
 
+const existingAppointmentUuids = []
+for (const direction of ['inbound', 'outbound']) {
+  existingAppointmentUuids.push(await upsertTool({
+    name: `check_${direction}_appointments`,
+    description: `Check upcoming appointments for this ${direction} caller before collecting new booking details. Returns existing dates/times and today's India date. Does not create or cancel anything.`,
+    category: 'http_api', icon: 'calendar-check', icon_color: '#0F766E',
+    definition: { schema_version: 1, type: 'http_api', config: {
+      method: 'POST', url: `${crmPublicUrl}/api/appointments/existing`, credential_uuid: credentialUuid,
+      parameters: [stringParameter('fallbackPhone', 'Only when caller ID is unavailable: contact number explicitly supplied by the customer.', false)],
+      preset_parameters: [{ name: 'phone', type: 'string', value_template: direction === 'inbound' ? '{{initial_context.caller_number}}' : '{{initial_context.phone_number}}', required: false }],
+      timeout_ms: 8000,
+    } },
+  }))
+}
+
 const commonAppointmentParameters = [
   stringParameter('date', 'Resolved date YYYY-MM-DD using get_booking_calendar. Optional for today/tomorrow: the server resolves spokenDate. Never invent a year.', false),
   stringParameter('spokenDate', 'Customer original date words exactly as spoken, such as “कल 13 तारीख” or “Monday 14 September”.'),
@@ -267,6 +282,7 @@ const definition = {
         delayed_start: false,
         extraction_enabled: false,
         tool_uuids: [
+          ...existingAppointmentUuids,
           calendarUuid,
           outboundAppointmentUuid,
           inboundAppointmentUuid,

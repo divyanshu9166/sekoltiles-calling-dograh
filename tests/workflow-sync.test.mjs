@@ -36,6 +36,8 @@ test('sync publishes calendar and booking recovery without replacing chosen mode
     assert.equal(update.workflow_configurations.telephony_configuration_id, 3)
     const start = update.workflow_definition.nodes.find(n => n.type === 'startCall')
     assert.ok(start.data.tool_uuids.includes('get_booking_calendar'))
+    assert.ok(start.data.tool_uuids.includes('check_inbound_appointments'))
+    assert.ok(start.data.tool_uuids.includes('check_outbound_appointments'))
     assert.ok(start.data.tool_uuids.includes('transfer_to_human'))
     assert.match(start.data.prompt, /NEXT missing detail/)
     const inbound = tools.find(t => t.name === 'book_inbound_appointment').definition.config

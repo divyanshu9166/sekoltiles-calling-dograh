@@ -54,11 +54,15 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(first.data.date, '2026-09-14')
     assert.equal(retry.data.id, first.data.id)
     assert.equal(appointments.length, 1)
+    const duplicate = await (await post(request({ ...body, time: '3:00 PM' }))).json()
+    assert.equal(duplicate.code, 'ALREADY_BOOKED')
+    assert.equal(duplicate.data.id, first.data.id)
+    assert.equal(appointments.length, 1)
     const sunday = await (await post(request({ ...body, spokenDate: 'आज' }))).json()
     assert.equal(sunday.code, 'SUNDAY_CLOSED')
     const invalid = await (await post(request({ ...body, phone: 'unknown' }))).json()
     assert.equal(invalid.code, 'INVALID_PHONE')
-    assert.equal(count(), 2)
+    assert.equal(count(), 3)
   } finally {
     if (previous === undefined) delete process.env.CRM_API_SECRET
     else process.env.CRM_API_SECRET = previous
