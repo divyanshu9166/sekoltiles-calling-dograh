@@ -69,23 +69,44 @@ class FallbackGroqLLMService(GroqLLMService):
             or DEFAULT_FALLBACK_MODEL
         )
         self._fallback_active = self._primary_model == self._fallback_model
+        self._primary_requests = 0
+        try:
+            self._primary_request_limit = max(
+                1, int(os.getenv("DOGRAH_GROQ_PRIMARY_MAX_REQUESTS", "3"))
+            )
+        except ValueError:
+            self._primary_request_limit = 3
+
+    def _set_fallback(self, reason: str) -> None:
+        self._fallback_active = True
+        self._settings.model = self._fallback_model
+        self.set_full_model_name(self._fallback_model)
+        logger.warning(
+            "Switching Groq model from {} to {} ({})",
+            self._primary_model,
+            self._fallback_model,
+            reason,
+        )
+
+    def _apply_primary_budget_guard(self) -> None:
+        if self._fallback_active:
+            return
+        if self._primary_requests >= self._primary_request_limit:
+            self._set_fallback(
+                f"per-call primary request budget {self._primary_request_limit} reached"
+            )
+            return
+        self._primary_requests += 1
 
     def _activate_fallback(self, exc: Exception) -> bool:
         if self._fallback_active or not _is_retryable_model_error(exc):
             return False
 
-        self._fallback_active = True
-        self._settings.model = self._fallback_model
-        self.set_full_model_name(self._fallback_model)
-        logger.warning(
-            "Groq primary model {} failed with {}; switching this call to {}",
-            self._primary_model,
-            type(exc).__name__,
-            self._fallback_model,
-        )
+        self._set_fallback(type(exc).__name__)
         return True
 
     async def get_chat_completions(self, context: Any) -> AsyncIterator[Any]:
+        self._apply_primary_budget_guard()
         primary_stream = None
         try:
             primary_stream = await super().get_chat_completions(context)
@@ -121,6 +142,7 @@ class FallbackGroqLLMService(GroqLLMService):
         max_tokens: int | None = None,
         system_instruction: str | None = None,
     ) -> str | None:
+        self._apply_primary_budget_guard()
         try:
             return await super().run_inference(
                 context,

@@ -69,144 +69,33 @@ function stringParameter(name, description, required = true) {
 
 const credentialUuid = await upsertCredential()
 
-const existingAppointmentUuids = []
-for (const direction of ['inbound', 'outbound']) {
-  existingAppointmentUuids.push(await upsertTool({
-    name: `check_${direction}_appointments`,
-    description: `Check upcoming appointments for this ${direction} caller before collecting new booking details. Returns existing dates/times and today's India date. Does not create or cancel anything.`,
-    category: 'http_api', icon: 'calendar-check', icon_color: '#0F766E',
-    definition: { schema_version: 1, type: 'http_api', config: {
-      method: 'POST', url: `${crmPublicUrl}/api/appointments/existing`, credential_uuid: credentialUuid,
-      parameters: [stringParameter('fallbackPhone', 'Only when caller ID is unavailable: contact number explicitly supplied by the customer.', false)],
-      preset_parameters: [{ name: 'phone', type: 'string', value_template: direction === 'inbound' ? '{{initial_context.caller_number}}' : '{{initial_context.phone_number}}', required: false }],
-      timeout_ms: 8000,
-    } },
-  }))
-}
-
-const commonAppointmentParameters = [
-  stringParameter('date', 'Resolved date YYYY-MM-DD using get_booking_calendar. Optional for today/tomorrow: the server resolves spokenDate. Never invent a year.', false),
-  stringParameter('spokenDate', 'Customer original date words exactly as spoken, such as “कल 13 तारीख” or “Monday 14 September”.'),
-  stringParameter('time', 'Confirmed India-time slot: 10:00 AM, 11:00 AM, 12:00 PM, 2:00 PM, 3:00 PM, 4:00 PM, or 5:00 PM.'),
-  stringParameter('purpose', 'Purpose already mentioned by the customer. Default showroom visit; do not ask again.', false),
-  stringParameter('notes', 'Optional useful details from the conversation. Do not include invented information.', false),
+const trustedContextPresets = [
+  { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
+  { name: 'crmPhone', type: 'string', value_template: '{{initial_context.phone_number}}', required: false },
+  { name: 'crmName', type: 'string', value_template: '{{initial_context.customer_name}}', required: false },
+  { name: 'crmRegion', type: 'string', value_template: '{{initial_context.region}}', required: false },
 ]
 
-const calendarUuid = await upsertTool({
-  name: 'get_booking_calendar',
-  description: 'Read the current India date and next 14 business days. Use once when booking needs a date reference (especially inbound). No customer details required. Does not book or reserve a slot.',
-  category: 'http_api',
-  icon: 'calendar',
-  icon_color: '#0F766E',
+const customerActionUuid = await upsertTool({
+  name: 'customer_action',
+  description: 'Check/book appointments or record an agreed callback.',
+  category: 'http_api', icon: 'phone-forwarded', icon_color: '#2563EB',
   definition: { schema_version: 1, type: 'http_api', config: {
-    method: 'GET', url: `${crmPublicUrl}/api/appointments/calendar`, credential_uuid: credentialUuid,
-    parameters: [], timeout_ms: 5000,
+    method: 'POST', url: `${crmPublicUrl}/api/agent/action`, credential_uuid: credentialUuid,
+    parameters: [
+      stringParameter('action', 'check, book, or callback'),
+      stringParameter('customerName', 'Name if CRM has none.', false),
+      stringParameter('providedPhone', 'Phone if context has none.', false),
+      stringParameter('spokenDate', 'Booking date as spoken.', false),
+      stringParameter('date', 'Booking date YYYY-MM-DD if known.', false),
+      stringParameter('time', 'Booking time.', false),
+      stringParameter('purpose', 'Booking purpose.', false),
+      stringParameter('region', 'Region if CRM has none.', false),
+      stringParameter('preferredTime', 'Callback time.', false),
+      stringParameter('reason', 'Callback reason.', false),
+    ],
+    preset_parameters: trustedContextPresets, timeout_ms: 8000,
   } },
-})
-
-const outboundAppointmentUuid = await upsertTool({
-  name: 'book_outbound_appointment',
-  description: 'Book an outbound customer appointment using the CRM-supplied name, phone and region. Never ask the customer for known name or phone. Use only after date, time and purpose are confirmed.',
-  category: 'http_api',
-  icon: 'calendar-check',
-  icon_color: '#D97706',
-  definition: {
-    schema_version: 1,
-    type: 'http_api',
-    config: {
-      method: 'POST',
-      url: `${crmPublicUrl}/api/appointments/create`,
-      credential_uuid: credentialUuid,
-      parameters: commonAppointmentParameters,
-      preset_parameters: [
-        { name: 'customerName', type: 'string', value_template: '{{initial_context.customer_name}}', required: true },
-        { name: 'phone', type: 'string', value_template: '{{initial_context.phone_number}}', required: true },
-        { name: 'region', type: 'string', value_template: '{{initial_context.region}}', required: false },
-      ],
-      timeout_ms: 10_000,
-    },
-  },
-})
-
-const inboundAppointmentUuid = await upsertTool({
-  name: 'book_inbound_appointment',
-  description: 'Book an inbound caller appointment. The caller phone is already supplied; collect customer name, date, time and purpose before using this tool.',
-  category: 'http_api',
-  icon: 'calendar-check',
-  icon_color: '#0F766E',
-  definition: {
-    schema_version: 1,
-    type: 'http_api',
-    config: {
-      method: 'POST',
-      url: `${crmPublicUrl}/api/appointments/create`,
-      credential_uuid: credentialUuid,
-      parameters: [
-        stringParameter('customerName', 'Customer full name stated by the inbound caller.'),
-        stringParameter('fallbackPhone', 'Only if caller ID is unavailable or booking returned INVALID_PHONE: contact number explicitly provided by the caller. Never invent one.', false),
-        ...commonAppointmentParameters,
-      ],
-      preset_parameters: [
-        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
-      ],
-      timeout_ms: 10_000,
-    },
-  },
-})
-
-const commonCallbackParameters = [
-  stringParameter('preferredTime', 'Customer-confirmed callback time or time window in India time.'),
-  stringParameter('reason', 'Short reason the customer wants a human team member to call back.'),
-]
-
-const outboundCallbackUuid = await upsertTool({
-  name: 'request_outbound_human_callback',
-  description: 'Schedule a human-team callback during an outbound call only after the customer explicitly requests or accepts a callback. Customer name, phone and region come from trusted CRM context; never ask for the known name or phone.',
-  category: 'http_api',
-  icon: 'phone-forwarded',
-  icon_color: '#2563EB',
-  definition: {
-    schema_version: 1,
-    type: 'http_api',
-    config: {
-      method: 'POST',
-      url: `${crmPublicUrl}/api/calls/schedule-callback`,
-      credential_uuid: credentialUuid,
-      parameters: commonCallbackParameters,
-      preset_parameters: [
-        { name: 'customerName', type: 'string', value_template: '{{initial_context.customer_name}}', required: true },
-        { name: 'phone', type: 'string', value_template: '{{initial_context.phone_number}}', required: true },
-        { name: 'region', type: 'string', value_template: '{{initial_context.region}}', required: false },
-      ],
-      timeout_ms: 10_000,
-    },
-  },
-})
-
-const inboundCallbackUuid = await upsertTool({
-  name: 'request_inbound_human_callback',
-  description: 'Schedule a human-team callback for an inbound caller only after they explicitly agree to a callback. The caller phone is supplied automatically; collect their name, preferred time and reason one at a time. Do not use this tool merely because they requested a live transfer or human agent.',
-  category: 'http_api',
-  icon: 'phone-forwarded',
-  icon_color: '#7C3AED',
-  definition: {
-    schema_version: 1,
-    type: 'http_api',
-    config: {
-      method: 'POST',
-      url: `${crmPublicUrl}/api/calls/schedule-callback`,
-      credential_uuid: credentialUuid,
-      parameters: [
-        stringParameter('customerName', 'Customer full name stated by the inbound caller.'),
-        stringParameter('fallbackPhone', 'Contact number explicitly supplied by the caller only when caller ID is unavailable.', false),
-        ...commonCallbackParameters,
-      ],
-      preset_parameters: [
-        { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
-      ],
-      timeout_ms: 10_000,
-    },
-  },
 })
 
 const endCallUuid = await upsertTool({
@@ -282,12 +171,7 @@ const definition = {
         delayed_start: false,
         extraction_enabled: false,
         tool_uuids: [
-          ...existingAppointmentUuids,
-          calendarUuid,
-          outboundAppointmentUuid,
-          inboundAppointmentUuid,
-          outboundCallbackUuid,
-          inboundCallbackUuid,
+          customerActionUuid,
           ...(liveTransferUuid ? [liveTransferUuid] : []),
           endCallUuid,
         ],
@@ -342,5 +226,5 @@ if (validation.valid === false || validation.is_valid === false) {
 await api(`/workflow/${workflow.id}/publish`, { method: 'POST' })
 
 console.log(`Published Sekol Tiles workflow ${workflowUuid}.`)
-console.log(`Attached: outbound/inbound appointments, callbacks, ${liveTransferUuid ? 'live transfer, ' : ''}end-call, and CRM transcript webhook.`)
+console.log(`Attached: compact appointment/check/callback tools, ${liveTransferUuid ? 'live transfer, ' : ''}end-call, and CRM transcript webhook.`)
 console.log('Existing Dograh Groq, STT, TTS and telephony model selections were preserved.')

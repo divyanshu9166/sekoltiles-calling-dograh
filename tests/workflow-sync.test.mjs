@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-test('sync publishes calendar and booking recovery without replacing chosen models or telephony', async () => {
+test('sync publishes compact customer tools without replacing chosen models or telephony', async () => {
   const savedEnv = { ...process.env }
   const originalFetch = globalThis.fetch
   Object.assign(process.env, {
@@ -35,16 +35,23 @@ test('sync publishes calendar and booking recovery without replacing chosen mode
     assert.deepEqual(update.workflow_configurations.models, models)
     assert.equal(update.workflow_configurations.telephony_configuration_id, 3)
     const start = update.workflow_definition.nodes.find(n => n.type === 'startCall')
-    assert.ok(start.data.tool_uuids.includes('get_booking_calendar'))
-    assert.ok(start.data.tool_uuids.includes('check_inbound_appointments'))
-    assert.ok(start.data.tool_uuids.includes('check_outbound_appointments'))
+    assert.ok(start.data.tool_uuids.includes('customer_action'))
     assert.ok(start.data.tool_uuids.includes('transfer_to_human'))
+    assert.ok(start.data.tool_uuids.includes('end_call'))
+    assert.equal(start.data.tool_uuids.length, 3)
     assert.match(start.data.prompt, /NEXT missing detail/)
-    const inbound = tools.find(t => t.name === 'book_inbound_appointment').definition.config
-    assert.equal(inbound.preset_parameters.find(p => p.name === 'phone').required, false)
-    assert.equal(inbound.parameters.find(p => p.name === 'date').required, false)
-    assert.ok(inbound.parameters.some(p => p.name === 'fallbackPhone'))
+    assert.match(start.data.prompt, /Sunday is closed/)
+    assert.match(start.data.prompt, /Odisha\/West Bengal/)
+    assert.match(start.data.prompt, /immediately call transfer_to_human/)
+    assert.ok(start.data.prompt.length < 7_000, `prompt is ${start.data.prompt.length} chars`)
+    assert.ok(JSON.stringify(tools).length < 9_000, 'attached tool schemas must remain compact')
+    const booking = tools.find(t => t.name === 'customer_action').definition.config
+    assert.equal(booking.preset_parameters.find(p => p.name === 'phone').required, false)
+    assert.equal(booking.parameters.find(p => p.name === 'date').required, false)
+    assert.ok(booking.parameters.some(p => p.name === 'providedPhone'))
     assert.equal(tools.find(t => t.name === 'transfer_to_human').definition.config.destination, 'PJSIP/+919694716263@vobiz')
+    const webhook = update.workflow_definition.nodes.find(n => n.type === 'webhook')
+    assert.equal(webhook.data.endpoint_url, 'https://crm.invalid/api/calls/dograh-webhook')
   } finally {
     globalThis.fetch = originalFetch
     for (const key of Object.keys(process.env)) if (!(key in savedEnv)) delete process.env[key]

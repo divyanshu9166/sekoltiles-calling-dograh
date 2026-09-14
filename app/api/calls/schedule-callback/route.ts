@@ -14,11 +14,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { customerName, phone, fallbackPhone, preferredTime, reason, region } = await req.json()
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(fallbackPhone)
+    const { customerName, crmName, phone, crmPhone, providedPhone, preferredTime, reason, region, crmRegion } = await req.json()
+    const resolvedCustomerName = usableCustomerName(customerName) || usableCustomerName(crmName)
+    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
     if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once and retry using fallbackPhone.' })
     if (
-      typeof customerName !== 'string' || !customerName.trim() ||
+      !resolvedCustomerName ||
       typeof preferredTime !== 'string' || !preferredTime.trim()
     ) {
       return NextResponse.json({ success: false, code: 'MISSING_DETAILS', error: 'Ask only for the missing customer name or preferred callback time.' })
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     const callLog = await prisma.callLog.create({
       data: {
         contactId: contact?.id,
-        customerName: customerName.trim().slice(0, 120),
+        customerName: resolvedCustomerName.slice(0, 120),
         phone: normalizedPhone,
         direction: 'OUTBOUND',
         status: 'QUEUED',
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
         date: now,
         time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
         purpose: `Callback requested: ${reason || 'General'}`,
-        region: typeof region === 'string' && region.trim() ? region.trim().slice(0, 120) : null,
+        region: firstText(crmRegion, region)?.slice(0, 120) || null,
         outcome: 'Callback Scheduled',
         notes: `Customer requested callback at ${preferredTime.trim().slice(0, 200)}. Reason: ${typeof reason === 'string' ? reason.slice(0, 500) : 'General'}`,
         recording: false,
@@ -56,4 +57,16 @@ export async function POST(req: NextRequest) {
     console.error('Failed to schedule callback:', error)
     return NextResponse.json({ error: 'Failed to schedule callback' }, { status: 500 })
   }
+}
+
+function usableCustomerName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const name = value.trim()
+  if (!name || /^(customer|unknown(?: customer)?)$/i.test(name) || name.includes('{{')) return null
+  return name
+}
+
+function firstText(...values: unknown[]): string | null {
+  for (const value of values) if (typeof value === 'string' && value.trim() && !value.includes('{{')) return value.trim()
+  return null
 }

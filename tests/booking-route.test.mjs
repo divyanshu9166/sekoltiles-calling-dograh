@@ -44,7 +44,7 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
   process.env.CRM_API_SECRET = 'test-only'
   try {
     const { post, appointments, count } = handler()
-    const body = { customerName: 'Rahul', phone: '919166623128', spokenDate: 'कल', time: '14:00' }
+    const body = { crmName: 'Rahul', crmPhone: '919166623128', spokenDate: 'कल', time: '14:00' }
     const request = data => new Request('https://crm.invalid/api/appointments/create', {
       method: 'POST', headers: { 'x-api-secret': 'test-only', 'Content-Type': 'application/json' }, body: JSON.stringify(data),
     })
@@ -60,7 +60,7 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(appointments.length, 1)
     const sunday = await (await post(request({ ...body, spokenDate: 'आज' }))).json()
     assert.equal(sunday.code, 'SUNDAY_CLOSED')
-    const invalid = await (await post(request({ ...body, phone: 'unknown' }))).json()
+    const invalid = await (await post(request({ ...body, crmPhone: 'unknown' }))).json()
     assert.equal(invalid.code, 'INVALID_PHONE')
     assert.equal(count(), 3)
   } finally {

@@ -25,15 +25,19 @@ export async function POST(req: NextRequest) {
   let bookingDate: string | null = null
   try {
     const body = await req.json()
-    const { customerName, phone, fallbackPhone, date: rawDate, spokenDate, time: rawTime, purpose, notes, region } = body
+    const {
+      customerName, crmName, phone, crmPhone, providedPhone,
+      date: rawDate, spokenDate, time: rawTime, purpose, notes, region, crmRegion,
+    } = body
+    const resolvedCustomerName = usableCustomerName(customerName) || usableCustomerName(crmName)
 
-    if (typeof customerName !== 'string' || !customerName.trim() || (!rawDate && !spokenDate) || !rawTime) {
+    if (!resolvedCustomerName || (!rawDate && !spokenDate) || !rawTime) {
       return NextResponse.json({ success: false, code: 'MISSING_DETAILS', error: 'Ask only for the missing customer name, date or time. Do not repeat details already collected.' })
     }
     const today = indiaDateString()
     const date = resolveAppointmentDate(rawDate, spokenDate, today)
     const time = normalizeAppointmentTime(rawTime)
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(fallbackPhone)
+    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
     if (!date) {
       return NextResponse.json({
         success: false,
@@ -68,7 +72,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, code: 'PAST_SLOT', error: 'That time has already passed in India. Ask for a future slot.', currentIndiaDate: today, availableSlots: APPOINTMENT_SLOTS.filter(slot => !isPastAppointmentSlot(date, slot)), nextOpenDate: nextOpenAppointmentDate(date) })
     }
     bookingDate = date
-    const customer = customerName.trim().slice(0, 120)
+    const customer = resolvedCustomerName.slice(0, 120)
     const appointmentPurpose = typeof purpose === 'string' && purpose.trim()
       ? purpose.trim().slice(0, 500) : 'Showroom Visit'
     const appointmentNotes = typeof notes === 'string' && notes.trim()
@@ -120,7 +124,7 @@ export async function POST(req: NextRequest) {
           date: new Date(date),
           time,
           purpose: appointmentPurpose,
-          region: typeof region === 'string' && region.trim() ? region.trim().slice(0, 120) : null,
+          region: firstText(crmRegion, region)?.slice(0, 120) || null,
           notes: appointmentNotes,
           status: 'Scheduled',
         },
@@ -170,4 +174,16 @@ function slotTakenResponse(bookedTimes: string[], date: string | null) {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002'
+}
+
+function usableCustomerName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const name = value.trim()
+  if (!name || /^(customer|unknown(?: customer)?)$/i.test(name) || name.includes('{{')) return null
+  return name
+}
+
+function firstText(...values: unknown[]): string | null {
+  for (const value of values) if (typeof value === 'string' && value.trim() && !value.includes('{{')) return value.trim()
+  return null
 }

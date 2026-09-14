@@ -25,7 +25,7 @@ test('lookup scopes query to caller and active future bookings; never treats an 
     throw new Error(id)
   }
   new Function('require', 'module', 'exports', code)(require, module, module.exports)
-  const request = (secret = 'test-only', phone = '919166623128') => new Request('https://crm.invalid', { method: 'POST', headers: { 'x-api-secret': secret }, body: JSON.stringify({ phone }) })
+  const request = (secret = 'test-only', phone = '919166623128') => new Request('https://crm.invalid', { method: 'POST', headers: { 'x-api-secret': secret }, body: JSON.stringify({ crmPhone: phone }) })
   try {
     assert.equal((await module.exports.POST(request('wrong'))).status, 401)
     const result = await (await module.exports.POST(request())).json()

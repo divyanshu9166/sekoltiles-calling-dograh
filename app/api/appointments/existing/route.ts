@@ -7,8 +7,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   }
   try {
-    const { phone, fallbackPhone } = await req.json()
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(fallbackPhone)
+    const { phone, crmPhone, providedPhone } = await req.json()
+    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
     if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once, then retry using fallbackPhone.' })
     const now = new Date()
     const today = indiaDateString(now)
