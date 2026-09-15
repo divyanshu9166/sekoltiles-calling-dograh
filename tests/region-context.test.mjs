@@ -16,7 +16,7 @@ test('outbound and bulk leads pass their selected region into the Dograh call co
   assert.match(SEKOL_DOGRAH_PROMPT, /12x24 only as “बारह-चौबीस”/)
   assert.match(SEKOL_DOGRAH_PROMPT, /selected CRM lead zone/)
   assert.match(SEKOL_DOGRAH_PROMPT, /introduce BOTH sizes first/)
-  assert.match(SEKOL_DOGRAH_PROMPT, /बारह-अठारह और बारह-चौबीस टाइल्स उपलब्ध हैं/)
+  assert.match(SEKOL_DOGRAH_PROMPT, /बारह-अठारह और बारह-चौबीस टाइल्स की मैन्युफैक्चरिंग है/)
   assert.match(SEKOL_DOGRAH_PROMPT, /Price only after the customer chooses a size/)
   assert.match(SEKOL_DOGRAH_PROMPT, /इसी व्हाट्सऐप नंबर पर कैटलॉग शेयर कर सकते हैं/)
 })

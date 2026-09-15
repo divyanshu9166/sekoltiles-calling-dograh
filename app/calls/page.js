@@ -71,7 +71,7 @@ const directionFilters = ['All', 'Inbound', 'Outbound'];
 const statusFilters = ['All', 'Completed', 'Missed', 'No Answer', 'Busy'];
 const tagFilters = ['All', 'Hot Lead', 'Warm Lead', 'Cold Lead', 'Customer', 'Unknown'];
 const EMPTY_APPOINTMENT = { customer: '', phone: '', date: '', time: '', purpose: '', region: '', notes: '' };
-const DEFAULT_CAMPAIGN_INSTRUCTIONS = 'पहले दोनों उपलब्ध साइज़—बारह-अठारह और बारह-चौबीस—बताकर ग्राहक से जरूरी साइज़ पूछें। साइज़ चुनने के बाद चुने हुए region/zone के हिसाब से सही price बताएं, फिर पूछें कि इसी WhatsApp नंबर पर catalogue शेयर करें या showroom appointment book करना चाहेंगे।';
+const DEFAULT_CAMPAIGN_INSTRUCTIONS = 'पहले दोनों साइज़—बारह-अठारह और बारह-चौबीस टाइल्स की मैन्युफैक्चरिंग—बताकर ग्राहक से जरूरी साइज़ पूछें। साइज़ चुनने के बाद चुने हुए region/zone के हिसाब से सही price बताएं, फिर पूछें कि इसी WhatsApp नंबर पर catalogue शेयर करें या showroom appointment book करना चाहेंगे।';
 
 export default function CallsPage() {
   const [callLogs, setCallLogs] = useState([]);
