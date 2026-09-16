@@ -55,9 +55,53 @@ export function nextOpenAppointmentDate(date: string): string {
   return candidate
 }
 
+/** Month-name → number for fuzzy date parsing. */
+const MONTH_MAP: Record<string, number> = {
+  // Hindi
+  'जनवरी': 1, 'फरवरी': 2, 'फ़रवरी': 2, 'मार्च': 3, 'अप्रैल': 4,
+  'मई': 5, 'जून': 6, 'जुलाई': 7, 'अगस्त': 8,
+  'सितंबर': 9, 'सितम्बर': 9, 'अक्टूबर': 10, 'अक्तूबर': 10,
+  'नवंबर': 11, 'नवम्बर': 11, 'दिसंबर': 12, 'दिसम्बर': 12,
+  // English
+  'january': 1, 'february': 2, 'march': 3, 'april': 4,
+  'may': 5, 'june': 6, 'july': 7, 'august': 8,
+  'september': 9, 'october': 10, 'november': 11, 'december': 12,
+  'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'jun': 6,
+  'jul': 7, 'aug': 8, 'sep': 9, 'sept': 9,
+  'oct': 10, 'nov': 11, 'dec': 12,
+}
+
+/** Best-effort extraction of day+month from informal Hindi/English text. */
+function parseFuzzyDate(value: string, today: string): string | null {
+  const text = value.trim().toLocaleLowerCase('en-IN')
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number)
+
+  const dayMatch = text.match(/\b(\d{1,2})\b/)
+  if (!dayMatch) return null
+  const day = Number(dayMatch[1])
+  if (day < 1 || day > 31) return null
+
+  let month: number | null = null
+  for (const [name, num] of Object.entries(MONTH_MAP)) {
+    if (text.includes(name)) { month = num; break }
+  }
+
+  // "16 tarikh" / "16 तारीख" / "16 को" → infer current or next month
+  if (!month && /tarikh|तारीख|tarik|ko\b|को/.test(text)) {
+    month = day >= todayDay ? todayMonth : (todayMonth === 12 ? 1 : todayMonth + 1)
+  }
+
+  if (!month || month < 1 || month > 12) return null
+  let year = todayYear
+  if (month < todayMonth || (month === todayMonth && day < todayDay)) year++
+  const candidate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return normalizeAppointmentDate(candidate, today)
+}
+
 /**
  * Uses the customer's original spoken phrase as the authority for relative
- * dates. This prevents an LLM from turning “कल 13 तारीख” into a past month.
+ * dates. This prevents an LLM from turning "कल 13 तारीख" into a past month.
+ * Falls back to fuzzy parsing for Hindi month names, "X tarikh", etc.
  */
 export function resolveAppointmentDate(
   generatedDate: unknown,
@@ -75,13 +119,40 @@ export function resolveAppointmentDate(
       return today
     }
   }
-  return normalizeAppointmentDate(generatedDate, today) || normalizeAppointmentDate(spokenDate, today)
+  // Strict YYYY-MM-DD check first
+  const strict = normalizeAppointmentDate(generatedDate, today) || normalizeAppointmentDate(spokenDate, today)
+  if (strict) return strict
+  // Fuzzy date parsing (Hindi month names, "X tarikh", etc.)
+  if (typeof generatedDate === 'string') { const f = parseFuzzyDate(generatedDate, today); if (f) return f }
+  if (typeof spokenDate === 'string') { const f = parseFuzzyDate(spokenDate, today); if (f) return f }
+  return null
 }
 
-/** Returns the fixed slot label; supports 24-hour input from HTML time fields. */
+/** Returns the fixed slot label; supports Hindi time, bare numbers, and 24-hour input. */
 export function normalizeAppointmentTime(value: unknown): (typeof APPOINTMENT_SLOTS)[number] | null {
   if (typeof value !== 'string') return null
-  const text = value.trim().toUpperCase().replace(/\s+/g, ' ')
+  const raw = value.trim()
+
+  // Hindi: "2 बजे", "दोपहर 3 बजे", "सुबह 10 बजे"
+  const hindiMatch = raw.match(/(\d{1,2})\s*(?:बजे|baje)/i)
+  if (hindiMatch) {
+    const h = Number(hindiMatch[1])
+    if (h >= 10 && h <= 12) return SLOT_BY_MINUTE.get(h * 60) ?? null
+    if (h >= 2 && h <= 5) return SLOT_BY_MINUTE.get((h + 12) * 60) ?? null
+    if (h >= 14 && h <= 17) return SLOT_BY_MINUTE.get(h * 60) ?? null
+    return null
+  }
+
+  // Bare number: "2", "10", "3"
+  if (/^\d{1,2}$/.test(raw)) {
+    const h = Number(raw)
+    if (h >= 10 && h <= 12) return SLOT_BY_MINUTE.get(h * 60) ?? null
+    if (h >= 2 && h <= 5) return SLOT_BY_MINUTE.get((h + 12) * 60) ?? null
+    if (h >= 14 && h <= 17) return SLOT_BY_MINUTE.get(h * 60) ?? null
+    return null
+  }
+
+  const text = raw.toUpperCase().replace(/\s+/g, ' ')
   const twelveHour = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/)
   let minutes: number
   if (twelveHour) {
