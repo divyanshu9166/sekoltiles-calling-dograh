@@ -89,6 +89,7 @@ const trustedContextPresets = [
   { name: 'direction', type: 'string', value_template: '{{initial_context.direction}}', required: false },
   { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
   { name: 'crmPhone', type: 'string', value_template: '{{initial_context.phone_number}}', required: false },
+  { name: 'calledNumber', type: 'string', value_template: '{{initial_context.called_number}}', required: false },
   { name: 'crmName', type: 'string', value_template: '{{initial_context.customer_name}}', required: false },
   { name: 'crmRegion', type: 'string', value_template: '{{initial_context.region}}', required: false },
 ]
@@ -103,6 +104,7 @@ const customerActionUuid = await upsertTool({
       stringParameter('action', 'check, book, reschedule, or callback'),
       stringParameter('customerName', 'Name if CRM has none.', false),
       stringParameter('providedPhone', 'Phone if context has none.', false),
+      stringParameter('calledNumber', 'Called number from context.', false),
       stringParameter('spokenDate', 'Booking date as spoken.', false),
       stringParameter('date', 'Booking date YYYY-MM-DD if known.', false),
       stringParameter('time', 'Booking time.', false),

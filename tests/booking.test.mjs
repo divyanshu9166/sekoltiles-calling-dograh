@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { normalizeCustomerPhone, resolveCustomerPhone, resolveAppointmentDate, isSundayAppointmentDate, nextOpenAppointmentDate, isPastAppointmentSlot, normalizeAppointmentTime } from '../lib/appointments/booking.ts'
 
 test('ARI and customer Indian number formats normalize to one identity', () => {
-  for (const phone of ['919166623128', '+919166623128', '9166623128', '00919166623128', '+91 91666 23128']) {
+  for (const phone of ['919166623128', '+919166623128', '9166623128', '00919166623128', '+91 91666 23128', 'PJSIP/+919166623128@vobiz', 'SIP/919166623128@carrier']) {
     assert.equal(normalizeCustomerPhone(phone), '+919166623128')
   }
   for (const phone of ['unknown', '{{initial_context.caller_number}}', '8000', '+910000000000']) assert.equal(normalizeCustomerPhone(phone), null)
@@ -13,9 +13,10 @@ test('resolveCustomerPhone never books appointments under agent outbound CLI num
   const agentCli = '+917955853365'
   const customerNumber = '+919166623128'
 
-  // Outbound calls must prioritize crmPhone and NEVER use agent CLI
+  // Outbound calls must prioritize crmPhone or calledNumber and NEVER use agent CLI
   assert.equal(resolveCustomerPhone({ direction: 'outbound', phone: agentCli, crmPhone: customerNumber }), customerNumber)
   assert.equal(resolveCustomerPhone({ direction: 'OUTBOUND', phone: agentCli, crmPhone: '9166623128' }), customerNumber)
+  assert.equal(resolveCustomerPhone({ direction: 'outbound', phone: agentCli, calledNumber: 'PJSIP/+919166623128@vobiz' }), customerNumber)
   assert.equal(resolveCustomerPhone({ phone: agentCli, crmPhone: customerNumber }), customerNumber)
 
   // Inbound calls use caller ID (phone)

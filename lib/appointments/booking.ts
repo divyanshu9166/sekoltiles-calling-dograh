@@ -181,7 +181,11 @@ export function timeToMinutes(value: string): number | null {
 
 export function normalizeCustomerPhone(value: unknown): string | null {
   if (typeof value !== 'string') return null
-  let phone = value.replace(/[\s().-]/g, '')
+  let phone = value.trim()
+  // Strip SIP URI / trunk prefixes like PJSIP/+919166623128@vobiz or sip:9166623128@...
+  phone = phone.replace(/^(?:PJSIP\/|SIP\/|sip:)/i, '')
+  phone = phone.replace(/@.*$/, '')
+  phone = phone.replace(/[\s().-]/g, '')
   // ARI preserves carrier caller ID, which commonly omits the leading +.
   if (/^91[6-9]\d{9}$/.test(phone)) phone = `+${phone}`
   else if (/^[6-9]\d{9}$/.test(phone)) phone = `+91${phone}`
@@ -193,25 +197,27 @@ export function normalizeCustomerPhone(value: unknown): string | null {
 export function resolveCustomerPhone(input: {
   direction?: unknown
   crmPhone?: unknown
+  calledNumber?: unknown
   phone?: unknown
   providedPhone?: unknown
   fallbackPhone?: unknown
 }): string | null {
   const dir = typeof input.direction === 'string' ? input.direction.trim().toLowerCase() : ''
   const crm = normalizeCustomerPhone(input.crmPhone)
+  const called = normalizeCustomerPhone(input.calledNumber)
   const caller = normalizeCustomerPhone(input.phone)
   const provided = normalizeCustomerPhone(input.providedPhone) || normalizeCustomerPhone(input.fallbackPhone)
 
-  // In outbound calls, the customer is the dialed number (crmPhone), never the agent's outbound caller ID (phone).
+  // In outbound calls, the customer is the dialed number (crmPhone or calledNumber), never the agent's outbound caller ID (phone).
   if (dir === 'outbound') {
-    return crm || provided || null
+    return crm || called || provided || null
   }
   // In inbound calls, the customer is the incoming caller ID (phone).
   if (dir === 'inbound') {
     return caller || provided || null
   }
-  // If direction is unspecified, prioritize crmPhone (the lead contact), then caller, then provided.
-  return crm || caller || provided || null
+  // If direction is unspecified, prioritize crmPhone (the lead contact), then called, then provided, then caller.
+  return crm || called || provided || caller || null
 }
 
 export function isPastAppointmentSlot(date: string, time: string, now = new Date()): boolean {

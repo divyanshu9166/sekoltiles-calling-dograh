@@ -70,16 +70,17 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(first.data.date, '2026-09-14')
     assert.equal(retry.data.id, first.data.id)
     assert.equal(appointments.length, 1)
-    const duplicate = await (await post(request({ ...body, time: '3:00 PM' }))).json()
-    assert.equal(duplicate.code, 'ALREADY_BOOKED')
-    assert.equal(duplicate.data.id, first.data.id)
+    // Idempotent check for the exact same slot returns success with alreadyBooked: true
+    const sameSlot = await (await post(request(body))).json()
+    assert.equal(sameSlot.success, true)
+    assert.equal(sameSlot.alreadyBooked, true)
     assert.equal(appointments.length, 1)
     const sunday = await (await post(request({ ...body, spokenDate: 'आज' }))).json()
     assert.equal(sunday.code, 'SUNDAY_CLOSED')
     const invalid = await (await post(request({ ...body, crmPhone: 'unknown' }))).json()
     assert.equal(invalid.code, 'INVALID_PHONE')
-    // Reschedule modifies the existing appointment to the new slot
-    const rescheduled = await (await post(request({ ...body, action: 'reschedule', time: '3:00 PM' }))).json()
+    // Requesting a different slot automatically reschedules the existing appointment
+    const rescheduled = await (await post(request({ ...body, time: '3:00 PM' }))).json()
     assert.equal(rescheduled.success, true)
     assert.equal(rescheduled.rescheduled, true)
     assert.equal(rescheduled.data.time, '3:00 PM')

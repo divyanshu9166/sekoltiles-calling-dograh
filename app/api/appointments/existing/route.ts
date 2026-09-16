@@ -8,8 +8,8 @@ export async function POST(req: NextRequest) {
   }
   try {
     const body = await req.json()
-    const { direction, phone, crmPhone, providedPhone, fallbackPhone } = body
-    const normalizedPhone = resolveCustomerPhone({ direction, crmPhone, phone, providedPhone, fallbackPhone })
+    const { direction, phone, crmPhone, providedPhone, fallbackPhone, calledNumber } = body
+    const normalizedPhone = resolveCustomerPhone({ direction, crmPhone, calledNumber, phone, providedPhone, fallbackPhone })
     if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once, then retry using fallbackPhone.' })
     const now = new Date()
     const today = indiaDateString(now)
