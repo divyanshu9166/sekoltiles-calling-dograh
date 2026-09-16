@@ -100,7 +100,7 @@ const customerActionUuid = await upsertTool({
   definition: { schema_version: 1, type: 'http_api', config: {
     method: 'POST', url: `${crmPublicUrl}/api/agent/action`, credential_uuid: credentialUuid,
     parameters: [
-      stringParameter('action', 'check, book, or callback'),
+      stringParameter('action', 'check, book, reschedule, or callback'),
       stringParameter('customerName', 'Name if CRM has none.', false),
       stringParameter('providedPhone', 'Phone if context has none.', false),
       stringParameter('spokenDate', 'Booking date as spoken.', false),
@@ -110,6 +110,7 @@ const customerActionUuid = await upsertTool({
       stringParameter('region', 'Region if CRM has none.', false),
       stringParameter('preferredTime', 'Callback time.', false),
       stringParameter('reason', 'Callback reason.', false),
+      stringParameter('reschedule', 'Set true if rescheduling existing appointment.', false),
     ],
     preset_parameters: trustedContextPresets, timeout_ms: 5000,
   } },

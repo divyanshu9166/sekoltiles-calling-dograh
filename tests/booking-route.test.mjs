@@ -18,6 +18,14 @@ function handler() {
         appointments.push(row)
         return row
       },
+      update: async ({ where, data }) => {
+        const index = appointments.findIndex(a => a.id === where.id)
+        if (index !== -1) {
+          appointments[index] = { ...appointments[index], ...data }
+          return appointments[index]
+        }
+        return data
+      },
     },
     contact: { upsert: async () => ({ id: 1 }) },
   }
@@ -70,7 +78,14 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(sunday.code, 'SUNDAY_CLOSED')
     const invalid = await (await post(request({ ...body, crmPhone: 'unknown' }))).json()
     assert.equal(invalid.code, 'INVALID_PHONE')
-    assert.equal(count(), 1)
+    // Reschedule modifies the existing appointment to the new slot
+    const rescheduled = await (await post(request({ ...body, action: 'reschedule', time: '3:00 PM' }))).json()
+    assert.equal(rescheduled.success, true)
+    assert.equal(rescheduled.rescheduled, true)
+    assert.equal(rescheduled.data.time, '3:00 PM')
+    assert.equal(appointments.length, 1)
+    assert.equal(appointments[0].time, '3:00 PM')
+    assert.equal(count(), 2)
   } finally {
     if (previous === undefined) delete process.env.CRM_API_SECRET
     else process.env.CRM_API_SECRET = previous

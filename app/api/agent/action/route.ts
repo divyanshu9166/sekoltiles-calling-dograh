@@ -6,6 +6,7 @@ import { POST as requestCallback } from '@/app/api/calls/schedule-callback/route
 const actions = {
   check: checkAppointments,
   book: bookAppointment,
+  reschedule: bookAppointment,
   callback: requestCallback,
 } as const
 

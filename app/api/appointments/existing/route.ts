@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       .sort((a, b) => a.date.localeCompare(b.date) || (timeToMinutes(a.time) ?? 0) - (timeToMinutes(b.time) ?? 0))
       .slice(0, 3)
     return NextResponse.json({ success: true, currentIndiaDate: today, timeZone: 'Asia/Kolkata', hasAppointment: appointments.length > 0, appointments,
-      instruction: appointments.length ? 'Tell the caller their existing date/time. Do not create another booking automatically. Ask whether they want to keep it; use human help for rescheduling.' : 'No upcoming scheduled appointment found. Ask only for the next missing booking detail.',
+      instruction: appointments.length ? 'Tell the caller their existing date/time. Ask whether to keep it or reschedule. If they want to change the date or time, call customer_action with action=reschedule.' : 'No upcoming scheduled appointment found. Ask only for the next missing booking detail.',
     })
   } catch {
     return NextResponse.json({ success: false, code: 'LOOKUP_UNAVAILABLE', error: 'Could not check existing bookings. Do not claim there are none. Offer human help or retry once.' }, { status: 503 })

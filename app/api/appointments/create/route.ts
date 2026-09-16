@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, code: 'PAST_SLOT', error: 'That time has already passed in India. Ask for a future slot.', currentIndiaDate: today, availableSlots: APPOINTMENT_SLOTS.filter(slot => !isPastAppointmentSlot(date, slot)), nextOpenDate: nextOpenAppointmentDate(date) })
     }
     // Fast pre-check: does this customer already have an upcoming appointment?
+    const isReschedule = body.action === 'reschedule' || body.reschedule === true
     const existingForCaller = await prisma.appointment.findFirst({
       where: { contact: { phone: normalizedPhone }, status: 'Scheduled', date: { gte: new Date(`${today}T00:00:00Z`) } },
       select: { id: true, date: true, time: true, purpose: true, region: true },
@@ -83,9 +84,11 @@ export async function POST(req: NextRequest) {
       if (exDate === date && existingForCaller.time === time) {
         return NextResponse.json({ success: true, data: { id: existingForCaller.id, date, time, purpose: existingForCaller.purpose ?? 'Showroom Visit', region: existingForCaller.region } })
       }
-      return NextResponse.json({ success: false, code: 'ALREADY_BOOKED', data: { id: existingForCaller.id, date: exDate, time: existingForCaller.time },
-        error: 'This customer already has an upcoming appointment. Tell them its date/time. No new booking was made; offer human help for rescheduling.',
-      })
+      if (!isReschedule) {
+        return NextResponse.json({ success: false, code: 'ALREADY_BOOKED', data: { id: existingForCaller.id, date: exDate, time: existingForCaller.time },
+          error: 'This customer already has an upcoming appointment. Tell them its date/time. Use action=reschedule to change it.',
+        })
+      }
     }
     bookingDate = date
     const customer = resolvedCustomerName.slice(0, 120)
@@ -99,7 +102,11 @@ export async function POST(req: NextRequest) {
     const appointment = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
       const existingAppointments = await tx.appointment.findMany({
-        where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
+        where: {
+          date: { gte: dayStart, lte: dayEnd },
+          status: { not: 'Cancelled' },
+          ...(existingForCaller ? { id: { not: existingForCaller.id } } : {}),
+        },
         select: { time: true },
       })
       const requestedMinutes = timeToMinutes(time)
@@ -111,6 +118,20 @@ export async function POST(req: NextRequest) {
         const error = new Error('APPOINTMENT_SLOT_TAKEN') as Error & { bookedTimes?: string[] }
         error.bookedTimes = existingAppointments.map((appointment) => appointment.time)
         throw error
+      }
+
+      if (existingForCaller && isReschedule) {
+        return tx.appointment.update({
+          where: { id: existingForCaller.id },
+          data: {
+            date: new Date(date),
+            time,
+            purpose: appointmentPurpose,
+            region: firstText(crmRegion, region)?.slice(0, 120) || null,
+            notes: appointmentNotes,
+            status: 'Scheduled',
+          },
+        })
       }
 
       // Upsert prevents an orphaned contact or a duplicate-phone race.
@@ -135,6 +156,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      rescheduled: Boolean(existingForCaller && isReschedule),
       data: {
         id: appointment.id,
         date,
