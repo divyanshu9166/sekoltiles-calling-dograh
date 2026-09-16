@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { indiaDateString, isPastAppointmentSlot, normalizeCustomerPhone, timeToMinutes } from '@/lib/appointments/booking'
+import { indiaDateString, isPastAppointmentSlot, normalizeCustomerPhone, resolveCustomerPhone, timeToMinutes } from '@/lib/appointments/booking'
 
 export async function POST(req: NextRequest) {
   if (!process.env.CRM_API_SECRET || req.headers.get('x-api-secret') !== process.env.CRM_API_SECRET) {
     return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
   }
   try {
-    const { phone, crmPhone, providedPhone } = await req.json()
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
+    const body = await req.json()
+    const { direction, phone, crmPhone, providedPhone, fallbackPhone } = body
+    const normalizedPhone = resolveCustomerPhone({ direction, crmPhone, phone, providedPhone, fallbackPhone })
     if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once, then retry using fallbackPhone.' })
     const now = new Date()
     const today = indiaDateString(now)

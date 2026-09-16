@@ -86,6 +86,7 @@ function stringParameter(name, description, required = true) {
 const credentialUuid = await upsertCredential()
 
 const trustedContextPresets = [
+  { name: 'direction', type: 'string', value_template: '{{initial_context.direction}}', required: false },
   { name: 'phone', type: 'string', value_template: '{{initial_context.caller_number}}', required: false },
   { name: 'crmPhone', type: 'string', value_template: '{{initial_context.phone_number}}', required: false },
   { name: 'crmName', type: 'string', value_template: '{{initial_context.customer_name}}', required: false },

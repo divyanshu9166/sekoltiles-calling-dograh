@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db'
 import {
   normalizeAppointmentTime,
   normalizeCustomerPhone,
+  resolveCustomerPhone,
   indiaDateString,
   isSundayAppointmentDate,
   nextOpenAppointmentDate,
@@ -26,7 +27,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const {
-      customerName, crmName, phone, crmPhone, providedPhone,
+      customerName, crmName, phone, crmPhone, providedPhone, direction,
       date: rawDate, spokenDate, time: rawTime, purpose, notes, region, crmRegion,
     } = body
     const resolvedCustomerName = usableCustomerName(customerName) || usableCustomerName(crmName)
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     const today = indiaDateString()
     const date = resolveAppointmentDate(rawDate, spokenDate, today)
     const time = normalizeAppointmentTime(rawTime)
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
+    const normalizedPhone = resolveCustomerPhone({ direction, crmPhone, phone, providedPhone, fallbackPhone: body.fallbackPhone })
     if (!date) {
       return NextResponse.json({
         success: false,

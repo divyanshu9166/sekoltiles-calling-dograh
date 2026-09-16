@@ -1,12 +1,29 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeCustomerPhone, resolveAppointmentDate, isSundayAppointmentDate, nextOpenAppointmentDate, isPastAppointmentSlot, normalizeAppointmentTime } from '../lib/appointments/booking.ts'
+import { normalizeCustomerPhone, resolveCustomerPhone, resolveAppointmentDate, isSundayAppointmentDate, nextOpenAppointmentDate, isPastAppointmentSlot, normalizeAppointmentTime } from '../lib/appointments/booking.ts'
 
 test('ARI and customer Indian number formats normalize to one identity', () => {
   for (const phone of ['919166623128', '+919166623128', '9166623128', '00919166623128', '+91 91666 23128']) {
     assert.equal(normalizeCustomerPhone(phone), '+919166623128')
   }
   for (const phone of ['unknown', '{{initial_context.caller_number}}', '8000', '+910000000000']) assert.equal(normalizeCustomerPhone(phone), null)
+})
+
+test('resolveCustomerPhone never books appointments under agent outbound CLI number', () => {
+  const agentCli = '+917955853365'
+  const customerNumber = '+919166623128'
+
+  // Outbound calls must prioritize crmPhone and NEVER use agent CLI
+  assert.equal(resolveCustomerPhone({ direction: 'outbound', phone: agentCli, crmPhone: customerNumber }), customerNumber)
+  assert.equal(resolveCustomerPhone({ direction: 'OUTBOUND', phone: agentCli, crmPhone: '9166623128' }), customerNumber)
+  assert.equal(resolveCustomerPhone({ phone: agentCli, crmPhone: customerNumber }), customerNumber)
+
+  // Inbound calls use caller ID (phone)
+  assert.equal(resolveCustomerPhone({ direction: 'inbound', phone: customerNumber, crmPhone: undefined }), customerNumber)
+  assert.equal(resolveCustomerPhone({ direction: 'inbound', phone: 'unknown', providedPhone: customerNumber }), customerNumber)
+
+  // Explicitly provided number fallback
+  assert.equal(resolveCustomerPhone({ direction: 'outbound', phone: agentCli, crmPhone: 'unknown', providedPhone: customerNumber }), customerNumber)
 })
 
 test('relative dates use India clock and reject past dates', () => {

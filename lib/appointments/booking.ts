@@ -190,6 +190,30 @@ export function normalizeCustomerPhone(value: unknown): string | null {
   return phone.startsWith('+91') && !/^\+91[6-9]\d{9}$/.test(phone) ? null : phone
 }
 
+export function resolveCustomerPhone(input: {
+  direction?: unknown
+  crmPhone?: unknown
+  phone?: unknown
+  providedPhone?: unknown
+  fallbackPhone?: unknown
+}): string | null {
+  const dir = typeof input.direction === 'string' ? input.direction.trim().toLowerCase() : ''
+  const crm = normalizeCustomerPhone(input.crmPhone)
+  const caller = normalizeCustomerPhone(input.phone)
+  const provided = normalizeCustomerPhone(input.providedPhone) || normalizeCustomerPhone(input.fallbackPhone)
+
+  // In outbound calls, the customer is the dialed number (crmPhone), never the agent's outbound caller ID (phone).
+  if (dir === 'outbound') {
+    return crm || provided || null
+  }
+  // In inbound calls, the customer is the incoming caller ID (phone).
+  if (dir === 'inbound') {
+    return caller || provided || null
+  }
+  // If direction is unspecified, prioritize crmPhone (the lead contact), then caller, then provided.
+  return crm || caller || provided || null
+}
+
 export function isPastAppointmentSlot(date: string, time: string, now = new Date()): boolean {
   const minutes = timeToMinutes(time)
   if (minutes === null) return true

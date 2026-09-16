@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { normalizeCustomerPhone } from '@/lib/appointments/booking'
+import { normalizeCustomerPhone, resolveCustomerPhone } from '@/lib/appointments/booking'
 
 /**
  * POST /api/calls/schedule-callback
@@ -14,9 +14,10 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { customerName, crmName, phone, crmPhone, providedPhone, preferredTime, reason, region, crmRegion } = await req.json()
+    const body = await req.json()
+    const { customerName, crmName, phone, crmPhone, providedPhone, direction, preferredTime, reason, region, crmRegion } = body
     const resolvedCustomerName = usableCustomerName(customerName) || usableCustomerName(crmName)
-    const normalizedPhone = normalizeCustomerPhone(phone) || normalizeCustomerPhone(crmPhone) || normalizeCustomerPhone(providedPhone)
+    const normalizedPhone = resolveCustomerPhone({ direction, crmPhone, phone, providedPhone, fallbackPhone: body.fallbackPhone })
     if (!normalizedPhone) return NextResponse.json({ success: false, code: 'INVALID_PHONE', error: 'Ask for a contact number once and retry using fallbackPhone.' })
     if (
       !resolvedCustomerName ||
