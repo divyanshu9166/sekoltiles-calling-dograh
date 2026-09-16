@@ -110,7 +110,7 @@ const customerActionUuid = await upsertTool({
       stringParameter('preferredTime', 'Callback time.', false),
       stringParameter('reason', 'Callback reason.', false),
     ],
-    preset_parameters: trustedContextPresets, timeout_ms: 8000,
+    preset_parameters: trustedContextPresets, timeout_ms: 5000,
   } },
 })
 

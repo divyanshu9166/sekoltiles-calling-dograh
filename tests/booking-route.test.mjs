@@ -21,7 +21,15 @@ function handler() {
     },
     contact: { upsert: async () => ({ id: 1 }) },
   }
-  const prisma = { $transaction: async fn => { transactions++; return fn(tx) } }
+  const prisma = {
+    appointment: {
+      findFirst: async ({ where }) => {
+        const phone = where?.contact?.phone
+        return appointments.find(a => a.contact?.phone === phone && a.status === 'Scheduled') || null
+      },
+    },
+    $transaction: async fn => { transactions++; return fn(tx) },
+  }
   const source = readFileSync(new URL('../app/api/appointments/create/route.ts', import.meta.url), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   const module = { exports: {} }
@@ -62,7 +70,7 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(sunday.code, 'SUNDAY_CLOSED')
     const invalid = await (await post(request({ ...body, crmPhone: 'unknown' }))).json()
     assert.equal(invalid.code, 'INVALID_PHONE')
-    assert.equal(count(), 3)
+    assert.equal(count(), 1)
   } finally {
     if (previous === undefined) delete process.env.CRM_API_SECRET
     else process.env.CRM_API_SECRET = previous

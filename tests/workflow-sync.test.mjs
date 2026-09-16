@@ -43,7 +43,7 @@ test('sync publishes compact customer tools without replacing chosen models or t
     assert.match(start.data.prompt, /helpful Indian sales executive/)
     assert.match(start.data.prompt, /If one reply supplies several details/)
     assert.match(start.data.prompt, /Never leave a conversational dead end/)
-    assert.match(start.data.prompt, /SAME turn before asking details/)
+    assert.match(start.data.prompt, /FIRST booking\/check request/)
     assert.match(start.data.prompt, /Sunday is closed/)
     assert.match(start.data.prompt, /Odisha\/West Bengal/)
     assert.match(start.data.prompt, /Rajasthan: 12x18 = ₹165; 12x24 = ₹210/)

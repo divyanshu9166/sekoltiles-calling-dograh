@@ -71,6 +71,21 @@ export async function POST(req: NextRequest) {
     if (isPastAppointmentSlot(date, time)) {
       return NextResponse.json({ success: false, code: 'PAST_SLOT', error: 'That time has already passed in India. Ask for a future slot.', currentIndiaDate: today, availableSlots: APPOINTMENT_SLOTS.filter(slot => !isPastAppointmentSlot(date, slot)), nextOpenDate: nextOpenAppointmentDate(date) })
     }
+    // Fast pre-check: does this customer already have an upcoming appointment?
+    const existingForCaller = await prisma.appointment.findFirst({
+      where: { contact: { phone: normalizedPhone }, status: 'Scheduled', date: { gte: new Date(`${today}T00:00:00Z`) } },
+      select: { id: true, date: true, time: true, purpose: true, region: true },
+      orderBy: { date: 'asc' },
+    })
+    if (existingForCaller && !isPastAppointmentSlot(existingForCaller.date.toISOString().slice(0, 10), existingForCaller.time)) {
+      const exDate = existingForCaller.date.toISOString().slice(0, 10)
+      if (exDate === date && existingForCaller.time === time) {
+        return NextResponse.json({ success: true, data: { id: existingForCaller.id, date, time, purpose: existingForCaller.purpose ?? 'Showroom Visit', region: existingForCaller.region } })
+      }
+      return NextResponse.json({ success: false, code: 'ALREADY_BOOKED', data: { id: existingForCaller.id, date: exDate, time: existingForCaller.time },
+        error: 'This customer already has an upcoming appointment. Tell them its date/time. No new booking was made; offer human help for rescheduling.',
+      })
+    }
     bookingDate = date
     const customer = resolvedCustomerName.slice(0, 120)
     const appointmentPurpose = typeof purpose === 'string' && purpose.trim()
@@ -81,20 +96,6 @@ export async function POST(req: NextRequest) {
     const dayStart = new Date(`${date}T00:00:00.000Z`)
     const dayEnd = new Date(`${date}T23:59:59.999Z`)
     const appointment = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer:${normalizedPhone}`}))`
-      const upcoming = await tx.appointment.findMany({
-        where: { contact: { phone: normalizedPhone }, status: 'Scheduled', date: { gte: new Date(`${today}T00:00:00Z`) } },
-        select: { id: true, date: true, time: true, purpose: true, region: true },
-        orderBy: { date: 'asc' },
-        take: 10,
-      })
-      const existingForCaller = upcoming.find(row => !isPastAppointmentSlot(row.date.toISOString().slice(0, 10), row.time))
-      if (existingForCaller) {
-        if (existingForCaller.date.toISOString().slice(0, 10) === date && existingForCaller.time === time) return existingForCaller
-        const conflict = new Error('ALREADY_BOOKED') as Error & { appointment?: { id: number; date: string; time: string } }
-        conflict.appointment = { id: existingForCaller.id, date: existingForCaller.date.toISOString().slice(0, 10), time: existingForCaller.time }
-        throw conflict
-      }
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
       const existingAppointments = await tx.appointment.findMany({
         where: { date: { gte: dayStart, lte: dayEnd }, status: { not: 'Cancelled' } },
@@ -129,7 +130,7 @@ export async function POST(req: NextRequest) {
           status: 'Scheduled',
         },
       })
-    }, { maxWait: 1500, timeout: 4000 })
+    }, { maxWait: 1000, timeout: 3000 })
 
     return NextResponse.json({
       success: true,
@@ -142,11 +143,7 @@ export async function POST(req: NextRequest) {
       },
     })
   } catch (error: unknown) {
-    if (error instanceof Error && error.message === 'ALREADY_BOOKED') {
-      return NextResponse.json({ success: false, code: 'ALREADY_BOOKED', data: (error as Error & { appointment?: unknown }).appointment,
-        error: 'This customer already has an upcoming appointment. Tell them its date/time. No new booking was made; offer human help for rescheduling.',
-      })
-    }
+
     if (error instanceof Error && error.message === 'APPOINTMENT_SLOT_TAKEN') {
       return slotTakenResponse((error as Error & { bookedTimes?: string[] }).bookedTimes || [], bookingDate)
     }
