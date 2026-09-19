@@ -37,6 +37,21 @@ const pollIntervalMs = 3000
 let stopping = false
 let workflowId
 
+function sanitizeCustomerName(value) {
+  if (typeof value !== 'string') return ''
+  let name = value.trim()
+  if (name.includes('{{')) return ''
+  name = name.replace(/(?:\+?91)?[6-9]\d{9}/g, '')
+  name = name.replace(/\d{4,}/g, '')
+  name = name.replace(/\d+/g, '')
+  name = name.replace(/^[\s\-_.#(),+]+|[\s\-_.#(),+]+$/g, '')
+  name = name.replace(/\s+/g, ' ').trim()
+  if (!name || /^(?:customer|unknown|unknown customer|client|party|na|null|none|user)$/i.test(name)) {
+    return ''
+  }
+  return name.slice(0, 80)
+}
+
 function sleep(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds))
 }
@@ -205,7 +220,14 @@ async function dialLead(lead) {
   })
 
   try {
-    const greeting = `नमस्ते ${lead.name} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
+    const cleanName = sanitizeCustomerName(lead.name)
+    const greeting = cleanName
+      ? `नमस्ते ${cleanName} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
+      : `नमस्ते, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
+    const normalizedInstructions = (lead.campaign.instructions || '')
+      .replace(/हमारे पास/g, 'हमारा')
+      .replace(/उपलब्ध साइज़/g, 'साइज़')
+      .slice(0, 2000)
     const run = await dograhRequest(`/public/agent/workflow/${encodeURIComponent(process.env.DOGRAH_WORKFLOW_UUID.trim())}`, {
       method: 'POST',
       body: JSON.stringify({
@@ -213,12 +235,12 @@ async function dialLead(lead) {
         initial_context: {
           direction: 'outbound',
           phone_number: lead.phone,
-          customer_name: lead.name,
+          customer_name: cleanName || 'Customer',
           region: lead.region || '',
           reason: `Bulk campaign: ${lead.campaign.name}`,
           campaign_name: lead.campaign.name,
           // Bound legacy campaigns created before the UI/API token guard.
-          campaign_instructions: lead.campaign.instructions.slice(0, 2000),
+          campaign_instructions: normalizedInstructions,
           campaign_id: lead.campaign.id,
           campaign_lead_id: lead.id,
           crm_call_log_id: callLog.id,

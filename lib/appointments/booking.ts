@@ -225,3 +225,23 @@ export function isPastAppointmentSlot(date: string, time: string, now = new Date
   if (minutes === null) return true
   return new Date(`${date}T00:00:00+05:30`).getTime() + minutes * 60_000 <= now.getTime()
 }
+
+export function sanitizeCustomerName(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  let name = value.trim()
+  if (name.includes('{{')) return ''
+  // Strip full phone numbers with optional + or 91 country code
+  name = name.replace(/(?:\+?91)?[6-9]\d{9}/g, '')
+  // Strip any sequences of 4 or more digits
+  name = name.replace(/\d{4,}/g, '')
+  // Strip any remaining digits
+  name = name.replace(/\d+/g, '')
+  // Strip punctuation and symbols like hyphens, underscores, dots, commas, parentheses
+  name = name.replace(/^[\s\-_.#(),+]+|[\s\-_.#(),+]+$/g, '')
+  // Collapse whitespace
+  name = name.replace(/\s+/g, ' ').trim()
+  if (!name || /^(?:customer|unknown|unknown customer|client|party|na|null|none|user)$/i.test(name)) {
+    return ''
+  }
+  return name.slice(0, 80)
+}

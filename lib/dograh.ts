@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { indiaDateString } from '@/lib/appointments/booking'
+import { indiaDateString, sanitizeCustomerName } from '@/lib/appointments/booking'
 
 type DograhEnvironment = Record<string, string | undefined>
 
@@ -126,7 +126,10 @@ export async function triggerDograhCall(
   const workflowUuid = required('DOGRAH_WORKFLOW_UUID', env)
   const telephonyConfigurationId = optionalInteger('DOGRAH_TELEPHONY_CONFIGURATION_ID', env)
   const fromPhoneNumberId = optionalInteger('DOGRAH_FROM_PHONE_NUMBER_ID', env)
-  const greeting = `नमस्ते ${input.customerName || 'ग्राहक'} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
+  const cleanName = sanitizeCustomerName(input.customerName)
+  const greeting = cleanName
+    ? `नमस्ते ${cleanName} जी, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
+    : `नमस्ते, मैं अनुष्का, Sekol Tiles से बोल रही हूँ। क्या अभी थोड़ी बात करना सुविधाजनक रहेगा?`
 
   return dograhRequest<DograhCallResponse>(
     `/public/agent/workflow/${encodeURIComponent(workflowUuid)}`,
@@ -136,7 +139,7 @@ export async function triggerDograhCall(
         phone_number: dograhOutboundDialTarget(input.phoneNumber, env),
         initial_context: {
           direction: 'outbound',
-          customer_name: input.customerName || 'Customer',
+          customer_name: cleanName || 'Customer',
           phone_number: input.phoneNumber,
           called_number: input.phoneNumber,
           reason: input.reason,

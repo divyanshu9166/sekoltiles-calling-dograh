@@ -1,6 +1,16 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeCustomerPhone, resolveCustomerPhone, resolveAppointmentDate, isSundayAppointmentDate, nextOpenAppointmentDate, isPastAppointmentSlot, normalizeAppointmentTime } from '../lib/appointments/booking.ts'
+import { normalizeCustomerPhone, resolveCustomerPhone, resolveAppointmentDate, isSundayAppointmentDate, nextOpenAppointmentDate, isPastAppointmentSlot, normalizeAppointmentTime, sanitizeCustomerName } from '../lib/appointments/booking.ts'
+
+test('sanitizeCustomerName strips concatenated phone numbers and generic values', () => {
+  assert.equal(sanitizeCustomerName('puneet jurel8077902205'), 'puneet jurel')
+  assert.equal(sanitizeCustomerName('puneet jurel 8077902205'), 'puneet jurel')
+  assert.equal(sanitizeCustomerName('puneet jurel - +918077902205'), 'puneet jurel')
+  assert.equal(sanitizeCustomerName('8077902205'), '')
+  assert.equal(sanitizeCustomerName('+918077902205'), '')
+  assert.equal(sanitizeCustomerName('Customer'), '')
+  assert.equal(sanitizeCustomerName('Rahul Sharma'), 'Rahul Sharma')
+})
 
 test('ARI and customer Indian number formats normalize to one identity', () => {
   for (const phone of ['919166623128', '+919166623128', '9166623128', '00919166623128', '+91 91666 23128', 'PJSIP/+919166623128@vobiz', 'SIP/919166623128@carrier']) {

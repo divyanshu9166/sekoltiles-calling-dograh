@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { normalizeCustomerPhone, resolveCustomerPhone } from '@/lib/appointments/booking'
+import { normalizeCustomerPhone, resolveCustomerPhone, sanitizeCustomerName } from '@/lib/appointments/booking'
 
 /**
  * POST /api/calls/schedule-callback
@@ -61,10 +61,8 @@ export async function POST(req: NextRequest) {
 }
 
 function usableCustomerName(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const name = value.trim()
-  if (!name || /^(customer|unknown(?: customer)?)$/i.test(name) || name.includes('{{')) return null
-  return name
+  const name = sanitizeCustomerName(value)
+  return name || null
 }
 
 function firstText(...values: unknown[]): string | null {

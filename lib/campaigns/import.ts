@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { readSheet } from 'read-excel-file/node'
+import { sanitizeCustomerName } from '@/lib/appointments/booking'
 
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024
 const MAX_IMPORT_ROWS = 5000
@@ -56,7 +57,8 @@ function rowsToLeads(rows: unknown[][]): ImportResult {
 
   for (const row of rows.slice(1)) {
     if (!row.some(value => String(value ?? '').trim())) continue
-    const name = String(row[nameColumn] ?? '').trim().slice(0, 120)
+    const rawName = String(row[nameColumn] ?? '').trim().slice(0, 120)
+    const name = sanitizeCustomerName(rawName) || rawName
     const phone = normalizeImportPhone(row[phoneColumn])
     const regionText = String(row[regionColumn] ?? '').trim().slice(0, 120)
     if (!name || !phone) {

@@ -11,6 +11,7 @@ import {
   timeToMinutes,
   APPOINTMENT_SLOTS,
   isPastAppointmentSlot,
+  sanitizeCustomerName,
 } from '@/lib/appointments/booking'
 
 /**
@@ -203,10 +204,8 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 function usableCustomerName(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const name = value.trim()
-  if (!name || /^(customer|unknown(?: customer)?)$/i.test(name) || name.includes('{{')) return null
-  return name
+  const name = sanitizeCustomerName(value)
+  return name || null
 }
 
 function firstText(...values: unknown[]): string | null {
