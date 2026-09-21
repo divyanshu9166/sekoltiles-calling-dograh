@@ -8,7 +8,8 @@ test('Dograh transfer requires deterministic explicit customer consent', async (
 
   assert.match(source, /explicit_consent_required/)
   assert.match(source, /customer_declined/)
-  assert.match(source, /रहने\\s\*दो/)
+  assert.match(source, /रहने\|रेहने\|रैने/)
+  assert.match(source, /reinforce_transfer_decline_context/)
   assert.match(source, /latest_assistant/)
   assert.match(source, /_AFFIRMATIVE\.fullmatch/)
   assert.match(override, /transfer_consent_guard\.py/)

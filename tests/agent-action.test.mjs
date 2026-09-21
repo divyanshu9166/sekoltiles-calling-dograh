@@ -19,6 +19,7 @@ test('compact customer action dispatches only authenticated supported actions', 
     if (id.includes('/appointments/existing/')) return { POST: responder('check') }
     if (id.includes('/appointments/create/')) return { POST: responder('book') }
     if (id.includes('/calls/schedule-callback/')) return { POST: responder('callback') }
+    if (id.includes('/calling-agent/customer-action-guard.mjs')) return { isCatalogueMisroutedToAppointment: () => false }
     throw new Error(`Unexpected import ${id}`)
   }
   new Function('require', 'module', 'exports', compiled)(require, module, module.exports)

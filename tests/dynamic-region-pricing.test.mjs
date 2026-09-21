@@ -19,6 +19,6 @@ test('custom region pricing replaces only the verified price table', () => {
   assert.match(prompt, /CATALOGUE FOLLOW-UP/)
   assert.match(prompt, /immediately call transfer_to_human/)
   assert.match(prompt, /Catalogue and appointment are separate intents/)
-  assert.match(prompt, /Any unclear or mistranscribed reply/)
+  assert.match(prompt, /Any other unclear or mistranscribed reply/)
   assert.match(prompt, /call end_call immediately/i)
 })

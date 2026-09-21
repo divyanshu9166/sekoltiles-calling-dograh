@@ -14,6 +14,10 @@ from typing import Any
 from loguru import logger
 from pipecat.services.groq.llm import GroqLLMService
 
+from api.services.workflow.transfer_consent_guard import (
+    reinforce_transfer_decline_context,
+)
+
 
 DEFAULT_FALLBACK_MODEL = "openai/gpt-oss-20b"
 DEFAULT_FALLBACK_MAX_COMPLETION_TOKENS = 512
@@ -129,6 +133,7 @@ class FallbackGroqLLMService(GroqLLMService):
         return True
 
     async def get_chat_completions(self, context: Any) -> AsyncIterator[Any]:
+        reinforce_transfer_decline_context(context)
         self._apply_primary_budget_guard()
         primary_stream = None
         try:

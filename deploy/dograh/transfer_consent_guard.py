@@ -18,9 +18,10 @@ logger = logging.getLogger(__name__)
 
 _NEGATIVE_PATTERNS = (
     r"\b(?:no|nope|nah|nahi|nahin|na|mat|cancel)\b",
-    r"\b(?:rehne|chhodo|chodo)\s+do\b",
+    r"\b(?:rehne|rehney|rahne|rene)(?:\s+(?:do|to))?\b",
+    r"\b(?:chhodo|chodo)(?:\s+do)?\b",
     r"\b(?:dont|do\s+not)\b",
-    r"(?:नहीं|नही|नहिं|ना|मत|रहने\s*दो|छोड़\s*दो|छोड\s*दो)",
+    r"(?:नहीं|नही|नहिं|ना|मत|(?:रहने|रेहने|रैने)(?:\s*(?:दो|तो))?|छोड़\s*दो|छोड\s*दो)",
     r"(?:ज़रूरत|जरूरत|आवश्यकता)\s*(?:नहीं|नही)",
 )
 
@@ -99,6 +100,43 @@ def transfer_consent_decision(messages: list[Any]) -> tuple[str, str]:
     if _TRANSFER_OFFER.search(latest_assistant) and _AFFIRMATIVE.fullmatch(normalized_user):
         return "allow", latest_user
     return "clarify", latest_user
+
+
+def reinforce_transfer_decline_context(context: Any) -> bool:
+    """Rewrite a fuzzy refusal into an unambiguous refusal for the LLM.
+
+    Deepgram can render ``रहने दो`` as ``रहने तो``.  When that happens directly
+    after a transfer offer, preserving the raw transcript is useful, but passing
+    the fuzzy wording to the LLM makes it ask the same question again.  The
+    realtime transcript is stored separately, so only the conversational LLM
+    context is clarified here.
+    """
+
+    messages = getattr(context, "messages", None)
+    if not isinstance(messages, list):
+        return False
+    latest_assistant = _latest_text(messages, "assistant")
+    latest_user = _latest_text(messages, "user")
+    normalized_user = _normalize(latest_user)
+    if not _TRANSFER_OFFER.search(latest_assistant):
+        return False
+    if not any(
+        re.search(pattern, normalized_user, re.IGNORECASE)
+        for pattern in _NEGATIVE_PATTERNS
+    ):
+        return False
+
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user":
+            message["content"] = (
+                "नहीं, रहने दीजिए। ह्यूमन एजेंट से कनेक्ट नहीं करना है।"
+            )
+            logger.info(
+                "Normalized fuzzy transfer refusal for LLM; original=%r",
+                latest_user,
+            )
+            return True
+    return False
 
 
 def install_transfer_consent_guard(custom_tool_manager_class: type) -> None:
@@ -184,8 +222,16 @@ if __name__ == "__main__":
     assert transfer_consent_decision([offer, {"role": "user", "content": "नहीं"}])[0] == "deny"
     assert transfer_consent_decision([offer, {"role": "user", "content": "ना"}])[0] == "deny"
     assert transfer_consent_decision([offer, {"role": "user", "content": "रहने दो"}])[0] == "deny"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "रहने तो"}])[0] == "deny"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "rehne to"}])[0] == "deny"
     assert transfer_consent_decision([offer, {"role": "user", "content": "Hello"}])[0] == "clarify"
     assert transfer_consent_decision(
         [{"role": "user", "content": "human agent se baat karwa do"}]
     )[0] == "allow"
+    class FakeContext:
+        messages = [offer, {"role": "user", "content": "रहने तो"}]
+
+    context = FakeContext()
+    assert reinforce_transfer_decline_context(context) is True
+    assert context.messages[-1]["content"].startswith("नहीं")
     print("transfer consent guard self-test passed")
