@@ -1,0 +1,191 @@
+"""Deterministic consent gate for Dograh's native transfer-call tool.
+
+The LLM is still responsible for conversation, but it is not trusted to make
+the irreversible transfer decision.  A transfer is allowed only when the most
+recent customer utterance either directly asks for a human or explicitly
+accepts the immediately preceding transfer offer.
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+_NEGATIVE_PATTERNS = (
+    r"\b(?:no|nope|nah|nahi|nahin|na|mat|cancel)\b",
+    r"\b(?:rehne|chhodo|chodo)\s+do\b",
+    r"\b(?:dont|do\s+not)\b",
+    r"(?:नहीं|नही|नहिं|ना|मत|रहने\s*दो|छोड़\s*दो|छोड\s*दो)",
+    r"(?:ज़रूरत|जरूरत|आवश्यकता)\s*(?:नहीं|नही)",
+)
+
+_DIRECT_HUMAN_REQUEST = re.compile(
+    r"(?:human|agent|representative|customer\s*care|team|"
+    r"ह्यूमन|एजेंट|कस्टमर\s*केयर|इंसान|व्यक्ति|टीम)"
+    r".{0,36}(?:connect|transfer|talk|speak|baat|jod|milwa|"
+    r"कनेक्ट|ट्रांसफर|बात|जोड़|जोड़|मिलवा)"
+    r"|(?:connect|transfer|talk|speak|baat|jod|milwa|"
+    r"कनेक्ट|ट्रांसफर|बात|जोड़|जोड़|मिलवा)"
+    r".{0,36}(?:human|agent|representative|customer\s*care|team|"
+    r"ह्यूमन|एजेंट|कस्टमर\s*केयर|इंसान|व्यक्ति|टीम)",
+    re.IGNORECASE,
+)
+
+_TRANSFER_OFFER = re.compile(
+    r"(?:human|agent|representative|team|ह्यूमन|एजेंट|इंसान|टीम)"
+    r".{0,50}(?:connect|transfer|कनेक्ट|ट्रांसफर|जोड़|जोड़)"
+    r"|(?:connect|transfer|कनेक्ट|ट्रांसफर|जोड़|जोड़)"
+    r".{0,50}(?:human|agent|representative|team|ह्यूमन|एजेंट|इंसान|टीम)",
+    re.IGNORECASE,
+)
+
+_AFFIRMATIVE = re.compile(
+    r"^(?:yes|yeah|yep|yup|ok|okay|sure|haan|han|haa|ha|"
+    r"bilkul|zaroor|जरूर|ज़रूर|हाँ|हां|हा|जी|ठीक\s*है|बिल्कुल)"
+    r"(?:\s+(?:please|जी|कर\s*दो|करा\s*दो|connect\s*कर\s*दो|"
+    r"कनेक्ट\s*कर\s*दो|जोड़\s*दो|जोड़\s*दो))*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text or "").casefold()
+    text = re.sub(r"[^\w\u0900-\u097f]+", " ", text, flags=re.UNICODE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _message_text(message: Any) -> str:
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        )
+    return ""
+
+
+def _latest_text(messages: list[Any], role: str) -> str:
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == role:
+            text = _message_text(message).strip()
+            if text:
+                return text
+    return ""
+
+
+def transfer_consent_decision(messages: list[Any]) -> tuple[str, str]:
+    """Return (allow|deny|clarify, latest_user_text)."""
+
+    latest_user = _latest_text(messages, "user")
+    normalized_user = _normalize(latest_user)
+    latest_assistant = _latest_text(messages, "assistant")
+
+    if not normalized_user:
+        return "clarify", latest_user
+    if any(re.search(pattern, normalized_user, re.IGNORECASE) for pattern in _NEGATIVE_PATTERNS):
+        return "deny", latest_user
+    if _DIRECT_HUMAN_REQUEST.search(normalized_user):
+        return "allow", latest_user
+    if _TRANSFER_OFFER.search(latest_assistant) and _AFFIRMATIVE.fullmatch(normalized_user):
+        return "allow", latest_user
+    return "clarify", latest_user
+
+
+def install_transfer_consent_guard(custom_tool_manager_class: type) -> None:
+    """Wrap Dograh's transfer handler exactly once."""
+
+    if getattr(custom_tool_manager_class, "_sekol_transfer_consent_guard", False):
+        return
+
+    original_factory = custom_tool_manager_class._create_transfer_call_handler
+
+    def guarded_factory(self: Any, tool: Any, function_name: str):
+        original_handler = original_factory(self, tool, function_name)
+
+        async def guarded_handler(function_call_params: Any) -> None:
+            from pipecat.frames.frames import (
+                FunctionCallResultProperties,
+                TTSSpeakFrame,
+            )
+            from pipecat.utils.enums import EndTaskReason
+
+            messages = list(getattr(self._engine.context, "messages", []) or [])
+            decision, latest_user = transfer_consent_decision(messages)
+            if decision == "allow":
+                logger.info(
+                    "Sekol transfer consent guard ALLOWED transfer; latest_user=%r",
+                    latest_user,
+                )
+                await original_handler(function_call_params)
+                return
+
+            logger.warning(
+                "Sekol transfer consent guard BLOCKED transfer; decision=%s latest_user=%r",
+                decision,
+                latest_user,
+            )
+            await function_call_params.result_callback(
+                {
+                    "status": "blocked",
+                    "action": "transfer_not_started",
+                    "reason": "customer_declined"
+                    if decision == "deny"
+                    else "explicit_consent_required",
+                },
+                properties=FunctionCallResultProperties(run_llm=False),
+            )
+
+            if decision == "deny":
+                message = "आपके समय के लिए धन्यवाद। नमस्ते!"
+                self._engine.set_call_disposition("customer_declined")
+            else:
+                message = (
+                    "माफ़ कीजिए, पुष्टि के लिए बताइए—क्या आप ह्यूमन एजेंट से "
+                    "कनेक्ट होना चाहते हैं? कृपया हाँ या नहीं कहें।"
+                )
+
+            self._engine.arm_speech_playback()
+            await self._engine.task.queue_frame(
+                TTSSpeakFrame(
+                    message,
+                    append_to_context=True,
+                    persist_to_logs=True,
+                )
+            )
+            if decision == "deny":
+                await self._engine.end_call_with_reason(
+                    EndTaskReason.END_CALL.value,
+                    abort_immediately=False,
+                )
+
+        return guarded_handler
+
+    custom_tool_manager_class._create_transfer_call_handler = guarded_factory
+    custom_tool_manager_class._sekol_transfer_consent_guard = True
+    logger.info("Installed Sekol deterministic transfer consent guard")
+
+
+if __name__ == "__main__":
+    offer = {
+        "role": "assistant",
+        "content": "क्या मैं आपको हमारे ह्यूमन एजेंट से कनेक्ट कर दूँ?",
+    }
+    assert transfer_consent_decision([offer, {"role": "user", "content": "हाँ"}])[0] == "allow"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "नहीं"}])[0] == "deny"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "ना"}])[0] == "deny"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "रहने दो"}])[0] == "deny"
+    assert transfer_consent_decision([offer, {"role": "user", "content": "Hello"}])[0] == "clarify"
+    assert transfer_consent_decision(
+        [{"role": "user", "content": "human agent se baat karwa do"}]
+    )[0] == "allow"
+    print("transfer consent guard self-test passed")
