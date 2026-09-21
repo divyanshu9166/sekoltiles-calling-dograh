@@ -113,12 +113,12 @@ const trustedContextPresets = [
 
 const customerActionUuid = await upsertTool({
   name: 'customer_action',
-  description: 'Check/book appointments or record an agreed callback.',
+  description: 'ONLY check/book/reschedule a showroom appointment or record an agreed callback. NEVER use for catalogue/catalog/brochure requests; catalogue requests need no tool and no date/time.',
   category: 'http_api', icon: 'phone-forwarded', icon_color: '#2563EB',
   definition: { schema_version: 1, type: 'http_api', config: {
     method: 'POST', url: `${crmPublicUrl}/api/agent/action`, credential_uuid: credentialUuid,
     parameters: [
-      stringParameter('action', 'check, book, reschedule, or callback'),
+      stringParameter('action', 'Exactly one of: check, book, reschedule, callback. Never use this tool for catalogue requests.'),
       stringParameter('customerName', 'Name if CRM has none.', false),
       stringParameter('providedPhone', 'Phone if context has none.', false),
       stringParameter('calledNumber', 'Called number from context.', false),
@@ -176,7 +176,7 @@ if (ariTrunkEndpoint && !/^[A-Za-z0-9_.-]+$/.test(ariTrunkEndpoint)) {
 const liveTransferUuid = isAriTelephony
   ? await upsertTool({
       name: 'transfer_to_human',
-      description: 'Immediately bridge a caller to the configured Sekol human team member after an explicit human-agent or call-transfer request.',
+      description: 'Bridge to the configured Sekol human team member only after an explicit transfer request, or after the caller explicitly says yes/haan/connect to the agent offer. Never invoke for no/nahi, silence, “main”, unclear, mistranscribed, or unrelated replies; ask for clear yes/no first.',
       category: 'transfer_call',
       icon: 'phone-forwarded',
       icon_color: '#2563EB',

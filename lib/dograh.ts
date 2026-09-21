@@ -251,7 +251,7 @@ export async function updateDograhHumanTransferDestination(
       method: 'PUT',
       body: JSON.stringify({
         name: 'transfer_to_human',
-        description: 'Immediately bridge a caller to the configured Sekol human team member after an explicit human-agent or call-transfer request.',
+        description: 'Bridge to the configured Sekol human team member only after an explicit transfer request, or after the caller explicitly says yes/haan/connect to the agent offer. Never invoke for no/nahi, silence, “main”, unclear, mistranscribed, or unrelated replies; ask for clear yes/no first.',
         icon: 'phone-forwarded',
         icon_color: '#2563EB',
         status: 'active',

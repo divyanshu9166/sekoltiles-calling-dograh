@@ -63,9 +63,11 @@ test('sync publishes compact customer tools without replacing chosen models or t
     assert.ok(start.data.prompt.length < 8_000, `prompt is ${start.data.prompt.length} chars`)
     assert.ok(JSON.stringify(tools).length < 9_000, 'attached tool schemas must remain compact')
     const booking = tools.find(t => t.name === 'customer_action').definition.config
+    assert.match(tools.find(t => t.name === 'customer_action').description, /NEVER use for catalogue/)
     assert.equal(booking.preset_parameters.find(p => p.name === 'phone').required, false)
     assert.equal(booking.parameters.find(p => p.name === 'date').required, false)
     assert.ok(booking.parameters.some(p => p.name === 'providedPhone'))
+    assert.match(tools.find(t => t.name === 'transfer_to_human').description, /explicitly says yes\/haan\/connect/)
     assert.equal(tools.find(t => t.name === 'transfer_to_human').definition.config.destination, 'PJSIP/+919694716263@vobiz')
     const webhook = update.workflow_definition.nodes.find(n => n.type === 'webhook')
     assert.equal(webhook.data.endpoint_url, 'https://crm.invalid/api/calls/dograh-webhook')

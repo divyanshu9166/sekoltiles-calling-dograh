@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { POST as checkAppointments } from '@/app/api/appointments/existing/route'
 import { POST as bookAppointment } from '@/app/api/appointments/create/route'
 import { POST as requestCallback } from '@/app/api/calls/schedule-callback/route'
+import { isCatalogueMisroutedToAppointment } from '@/lib/calling-agent/customer-action-guard.mjs'
 
 const actions = {
   check: checkAppointments,
@@ -24,6 +25,13 @@ export async function POST(req: NextRequest) {
   }
 
   const action = typeof body.action === 'string' ? body.action.toLowerCase() : ''
+  if (isCatalogueMisroutedToAppointment(body)) {
+    return NextResponse.json({
+      success: false,
+      code: 'CATALOGUE_NOT_APPOINTMENT',
+      instruction: 'This is a catalogue request, not an appointment. Do not ask for name, date, or time and do not call customer_action. Acknowledge the catalogue request using the configured catalogue follow-up, then ask whether they want a human agent.',
+    })
+  }
   const handler = actions[action as keyof typeof actions]
   if (!handler) {
     return NextResponse.json({ success: false, code: 'INVALID_ACTION', error: 'Use check, book, or callback.' }, { status: 400 })
