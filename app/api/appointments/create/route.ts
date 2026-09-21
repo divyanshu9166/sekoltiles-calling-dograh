@@ -8,7 +8,6 @@ import {
   isSundayAppointmentDate,
   nextOpenAppointmentDate,
   resolveAppointmentDate,
-  timeToMinutes,
   APPOINTMENT_SLOTS,
   isPastAppointmentSlot,
   sanitizeCustomerName,
@@ -24,7 +23,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let bookingDate: string | null = null
   try {
     const body = await req.json()
     const {
@@ -63,7 +61,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: false,
         code: 'INVALID_TIME',
-        error: 'Ask the customer to choose one of the listed showroom slots.',
+        error: 'Ask for a time between 9:00 AM and 5:00 PM.',
         availableSlots: APPOINTMENT_SLOTS,
       })
     }
@@ -92,36 +90,13 @@ export async function POST(req: NextRequest) {
       // If date or time differs: customer requested a different slot.
       // Automatically update/reschedule the existing appointment in the transaction below.
     }
-    bookingDate = date
     const customer = resolvedCustomerName.slice(0, 120)
     const appointmentPurpose = typeof purpose === 'string' && purpose.trim()
       ? purpose.trim().slice(0, 500) : 'Showroom Visit'
     const appointmentNotes = typeof notes === 'string' && notes.trim()
       ? notes.trim().slice(0, 2000) : 'Booked via AI Agent Anushka'
 
-    const dayStart = new Date(`${date}T00:00:00.000Z`)
-    const dayEnd = new Date(`${date}T23:59:59.999Z`)
     const appointment = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${date}:${time}`}))`
-      const existingAppointments = await tx.appointment.findMany({
-        where: {
-          date: { gte: dayStart, lte: dayEnd },
-          status: { not: 'Cancelled' },
-          ...(existingForCaller ? { id: { not: existingForCaller.id } } : {}),
-        },
-        select: { time: true },
-      })
-      const requestedMinutes = timeToMinutes(time)
-      const isTaken = existingAppointments.some((appointment) => {
-        const bookedMinutes = timeToMinutes(appointment.time)
-        return bookedMinutes !== null && requestedMinutes !== null && Math.abs(bookedMinutes - requestedMinutes) < 60
-      })
-      if (isTaken) {
-        const error = new Error('APPOINTMENT_SLOT_TAKEN') as Error & { bookedTimes?: string[] }
-        error.bookedTimes = existingAppointments.map((appointment) => appointment.time)
-        throw error
-      }
-
       if (existingForCaller) {
         return tx.appointment.update({
           where: { id: existingForCaller.id },
@@ -142,7 +117,6 @@ export async function POST(req: NextRequest) {
         update: { name: customer },
         create: { name: customer, phone: normalizedPhone },
       })
-      // The transaction advisory lock serializes requests for this fixed slot.
       return tx.appointment.create({
         data: {
           contactId: contact.id,
@@ -170,37 +144,12 @@ export async function POST(req: NextRequest) {
       message: isUpdated ? 'Appointment rescheduled successfully.' : 'Appointment booked successfully.',
       instruction: isUpdated
         ? 'Appointment updated. Say exactly: "आपकी appointment अपडेट हो चुकी है, धन्यवाद!" and immediately call end_call tool in the SAME turn. Do not ask any question and do not offer human transfer.'
-        : 'Appointment confirmed. Say exactly: "आपकी appointment book हो चुकी है, धन्यवाद!" and immediately call end_call tool in the SAME turn. Do not ask any question and do not offer human transfer.',
+        : 'Appointment confirmed. Say exactly: "आपका अपॉइंटमेंट बुक हो गया है, धन्यवाद।" and immediately call end_call tool in the SAME turn. Do not ask any question and do not offer human transfer.',
     })
   } catch (error: unknown) {
-
-    if (error instanceof Error && error.message === 'APPOINTMENT_SLOT_TAKEN') {
-      return slotTakenResponse((error as Error & { bookedTimes?: string[] }).bookedTimes || [], bookingDate)
-    }
-    if (isUniqueConstraintError(error) && bookingDate) {
-      const existing = await prisma.appointment.findMany({
-        where: { date: { gte: new Date(`${bookingDate}T00:00:00.000Z`), lte: new Date(`${bookingDate}T23:59:59.999Z`) }, status: { not: 'Cancelled' } },
-        select: { time: true },
-      })
-      return slotTakenResponse(existing.map((appointment) => appointment.time), bookingDate)
-    }
     console.error('Failed to create appointment:', error)
     return NextResponse.json({ success: false, code: 'BOOKING_UNAVAILABLE', error: 'Booking could not be confirmed. Tell the caller briefly; retry the same details once. If it fails again, offer a human transfer or callback with consent.' }, { status: 500 })
   }
-}
-
-function slotTakenResponse(bookedTimes: string[], date: string | null) {
-  const bookedMinutes = bookedTimes.map(timeToMinutes).filter((minutes): minutes is number => minutes !== null)
-  const suggestions = APPOINTMENT_SLOTS.filter((slot) => {
-    if (date && isPastAppointmentSlot(date, slot)) return false
-    const slotMinutes = timeToMinutes(slot)
-    return slotMinutes !== null && !bookedMinutes.some((booked) => Math.abs(booked - slotMinutes) < 60)
-  }).slice(0, 4)
-  return NextResponse.json({ success: false, code: 'SLOT_TAKEN', error: 'That slot was just booked.', available: false, suggestions })
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002'
 }
 
 function usableCustomerName(value: unknown): string | null {

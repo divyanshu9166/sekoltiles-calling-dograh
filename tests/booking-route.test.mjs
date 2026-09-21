@@ -8,13 +8,15 @@ import * as booking from '../lib/appointments/booking.ts'
 // No application .env, network request or production database is used.
 function handler() {
   const appointments = []
+  const contacts = new Map()
   let transactions = 0
   const tx = {
     $executeRaw: async () => {},
     appointment: {
       findMany: async () => appointments,
       create: async ({ data }) => {
-        const row = { ...data, id: appointments.length + 1, contact: { phone: '+919166623128' } }
+        const contact = [...contacts.entries()].find(([, value]) => value.id === data.contactId)
+        const row = { ...data, id: appointments.length + 1, contact: { phone: contact?.[0] } }
         appointments.push(row)
         return row
       },
@@ -27,7 +29,19 @@ function handler() {
         return data
       },
     },
-    contact: { upsert: async () => ({ id: 1 }) },
+    contact: {
+      upsert: async ({ where, update, create }) => {
+        const existing = contacts.get(where.phone)
+        if (existing) {
+          const row = { ...existing, ...update }
+          contacts.set(where.phone, row)
+          return row
+        }
+        const row = { ...create, id: contacts.size + 1 }
+        contacts.set(where.phone, row)
+        return row
+      },
+    },
   }
   const prisma = {
     appointment: {
@@ -87,6 +101,27 @@ test('booking handler accepts ARI caller ID and recovers committed retry without
     assert.equal(appointments.length, 1)
     assert.equal(appointments[0].time, '3:00 PM')
     assert.equal(count(), 2)
+  } finally {
+    if (previous === undefined) delete process.env.CRM_API_SECRET
+    else process.env.CRM_API_SECRET = previous
+  }
+})
+
+test('different customers may book the exact same showroom time', async () => {
+  const previous = process.env.CRM_API_SECRET
+  process.env.CRM_API_SECRET = 'test-only'
+  try {
+    const { post, appointments } = handler()
+    const request = data => new Request('https://crm.invalid/api/appointments/create', {
+      method: 'POST', headers: { 'x-api-secret': 'test-only', 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+    })
+    const first = await (await post(request({ crmName: 'Rahul', crmPhone: '+919166623128', date: '2026-09-14', time: '2:30 PM' }))).json()
+    const second = await (await post(request({ crmName: 'Priya', crmPhone: '+919876543210', date: '2026-09-14', time: '2:30 PM' }))).json()
+    assert.equal(first.success, true)
+    assert.equal(second.success, true)
+    assert.equal(appointments.length, 2)
+    assert.equal(appointments[0].time, '2:30 PM')
+    assert.equal(appointments[1].time, '2:30 PM')
   } finally {
     if (previous === undefined) delete process.env.CRM_API_SECRET
     else process.env.CRM_API_SECRET = previous

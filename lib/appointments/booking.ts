@@ -2,19 +2,19 @@
 export const APPOINTMENT_TIME_ZONE = 'Asia/Kolkata'
 
 export const APPOINTMENT_SLOTS = [
+  '9:00 AM',
   '10:00 AM',
   '11:00 AM',
   '12:00 PM',
+  '1:00 PM',
   '2:00 PM',
   '3:00 PM',
   '4:00 PM',
   '5:00 PM',
 ] as const
 
-const SLOT_BY_MINUTE = new Map<number, (typeof APPOINTMENT_SLOTS)[number]>([
-  [10 * 60, '10:00 AM'], [11 * 60, '11:00 AM'], [12 * 60, '12:00 PM'],
-  [14 * 60, '2:00 PM'], [15 * 60, '3:00 PM'], [16 * 60, '4:00 PM'], [17 * 60, '5:00 PM'],
-])
+export const APPOINTMENT_OPEN_MINUTE = 9 * 60
+export const APPOINTMENT_CLOSE_MINUTE = 17 * 60
 
 export function indiaDateString(now = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -128,28 +128,44 @@ export function resolveAppointmentDate(
   return null
 }
 
-/** Returns the fixed slot label; supports Hindi time, bare numbers, and 24-hour input. */
-export function normalizeAppointmentTime(value: unknown): (typeof APPOINTMENT_SLOTS)[number] | null {
-  if (typeof value !== 'string') return null
-  const raw = value.trim()
+function formatAppointmentTime(minutes: number): string | null {
+  if (minutes < APPOINTMENT_OPEN_MINUTE || minutes > APPOINTMENT_CLOSE_MINUTE) return null
+  const hour24 = Math.floor(minutes / 60)
+  const minute = minutes % 60
+  const period = hour24 < 12 ? 'AM' : 'PM'
+  const hour12 = hour24 % 12 || 12
+  return `${hour12}:${String(minute).padStart(2, '0')} ${period}`
+}
 
-  // Hindi: "2 बजे", "दोपहर 3 बजे", "सुबह 10 बजे"
-  const hindiMatch = raw.match(/(\d{1,2})\s*(?:बजे|baje)/i)
-  if (hindiMatch) {
-    const h = Number(hindiMatch[1])
-    if (h >= 10 && h <= 12) return SLOT_BY_MINUTE.get(h * 60) ?? null
-    if (h >= 2 && h <= 5) return SLOT_BY_MINUTE.get((h + 12) * 60) ?? null
-    if (h >= 14 && h <= 17) return SLOT_BY_MINUTE.get(h * 60) ?? null
-    return null
+/** Accepts any time from 9:00 AM through 5:00 PM, inclusive. */
+export function normalizeAppointmentTime(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const hindiHours: Record<string, string> = {
+    'नौ': '9', 'दस': '10', 'ग्यारह': '11', 'बारह': '12',
+    'एक': '1', 'दो': '2', 'तीन': '3', 'चार': '4', 'पांच': '5', 'पाँच': '5',
+  }
+  let raw = value.trim()
+  for (const [word, digit] of Object.entries(hindiHours)) {
+    raw = raw.replace(new RegExp(`(^|\\s)${word}(?=\\s|$)`, 'g'), `$1${digit}`)
   }
 
-  // Bare number: "2", "10", "3"
+  // Hindi/Hinglish: "2 बजे", "दोपहर 3:30 बजे", "सुबह नौ बजे"
+  const hindiMatch = raw.match(/(\d{1,2})(?::(\d{1,2}))?\s*(?:बजे|baje)/i)
+  if (hindiMatch) {
+    const h = Number(hindiMatch[1])
+    const minute = Number(hindiMatch[2] ?? '0')
+    if (minute > 59) return null
+    const isMorning = /सुबह|morning/i.test(raw)
+    const isAfternoon = /दोपहर|शाम|afternoon|evening/i.test(raw)
+    const hour24 = h >= 13 ? h : isMorning ? h : isAfternoon ? (h % 12) + 12 : h <= 5 ? h + 12 : h
+    return formatAppointmentTime(hour24 * 60 + minute)
+  }
+
+  // Bare hour: "2", "9", "13"
   if (/^\d{1,2}$/.test(raw)) {
-    const h = Number(raw)
-    if (h >= 10 && h <= 12) return SLOT_BY_MINUTE.get(h * 60) ?? null
-    if (h >= 2 && h <= 5) return SLOT_BY_MINUTE.get((h + 12) * 60) ?? null
-    if (h >= 14 && h <= 17) return SLOT_BY_MINUTE.get(h * 60) ?? null
-    return null
+    const hour = Number(raw)
+    const hour24 = hour <= 5 ? hour + 12 : hour
+    return formatAppointmentTime(hour24 * 60)
   }
 
   const text = raw.toUpperCase().replace(/\s+/g, ' ')
@@ -168,15 +184,15 @@ export function normalizeAppointmentTime(value: unknown): (typeof APPOINTMENT_SL
     if (hour > 23 || minute > 59) return null
     minutes = hour * 60 + minute
   }
-  return SLOT_BY_MINUTE.get(minutes) ?? null
+  return formatAppointmentTime(minutes)
 }
 
 export function timeToMinutes(value: string): number | null {
   const slot = normalizeAppointmentTime(value)
   if (!slot) return null
-  const match = slot.match(/^(\d+):\d+ (AM|PM)$/)
+  const match = slot.match(/^(\d+):(\d{2}) (AM|PM)$/)
   if (!match) return null
-  return (Number(match[1]) % 12) * 60 + (match[2] === 'PM' ? 12 * 60 : 0)
+  return (Number(match[1]) % 12) * 60 + Number(match[2]) + (match[3] === 'PM' ? 12 * 60 : 0)
 }
 
 export function normalizeCustomerPhone(value: unknown): string | null {

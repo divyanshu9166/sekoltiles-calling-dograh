@@ -90,6 +90,23 @@ def customer_action_allowed(messages: list[Any], arguments: dict[str, Any]) -> b
     return False
 
 
+def appointment_confirmation_message(action: str, result: Any) -> str | None:
+    """Return the immediate spoken confirmation for a committed CRM result."""
+
+    if action not in {"book", "reschedule"} or not isinstance(result, dict):
+        return None
+    if result.get("status") != "success":
+        return None
+    data = result.get("data")
+    if not isinstance(data, dict) or data.get("success") is not True:
+        return None
+    if data.get("alreadyBooked") is True:
+        return "आपकी अपॉइंटमेंट पहले से इसी समय पर बुक है, धन्यवाद।"
+    if action == "reschedule" or data.get("rescheduled") is True:
+        return "आपकी अपॉइंटमेंट अपडेट हो गई है, धन्यवाद।"
+    return "आपका अपॉइंटमेंट बुक हो गया है, धन्यवाद।"
+
+
 def install_customer_action_intent_guard(custom_tool_manager_class: type) -> None:
     """Wrap Dograh's HTTP tool factory exactly once."""
 
@@ -107,6 +124,48 @@ def install_customer_action_intent_guard(custom_tool_manager_class: type) -> Non
             messages = list(getattr(self._engine.context, "messages", []) or [])
             arguments = dict(getattr(function_call_params, "arguments", {}) or {})
             if customer_action_allowed(messages, arguments):
+                action = str(arguments.get("action") or "").strip().lower()
+                original_callback = function_call_params.result_callback
+
+                async def appointment_result_callback(
+                    result: Any, *callback_args: Any, **callback_kwargs: Any
+                ) -> None:
+                    confirmation = appointment_confirmation_message(action, result)
+                    if confirmation is None:
+                        await original_callback(
+                            result, *callback_args, **callback_kwargs
+                        )
+                        return
+
+                    # The appointment is already committed.  Do not spend a
+                    # second LLM round deciding how to acknowledge it: speak
+                    # the fixed confirmation immediately and close gracefully
+                    # only after queued audio has played.
+                    from pipecat.frames.frames import (
+                        FunctionCallResultProperties,
+                        TTSSpeakFrame,
+                    )
+                    from pipecat.utils.enums import EndTaskReason
+
+                    await original_callback(
+                        result,
+                        properties=FunctionCallResultProperties(run_llm=False),
+                    )
+                    self._engine.set_call_disposition("appointment_booked")
+                    self._engine.arm_speech_playback()
+                    await self._engine.task.queue_frame(
+                        TTSSpeakFrame(
+                            confirmation,
+                            append_to_context=True,
+                            persist_to_logs=True,
+                        )
+                    )
+                    await self._engine.end_call_with_reason(
+                        EndTaskReason.END_CALL.value,
+                        abort_immediately=False,
+                    )
+
+                function_call_params.result_callback = appointment_result_callback
                 await original_handler(function_call_params)
                 return
 
@@ -151,4 +210,28 @@ if __name__ == "__main__":
     assert not customer_action_allowed(catalogue, {"action": "check"})
     assert customer_action_allowed(appointment, {"action": "check"})
     assert customer_action_allowed(booking_date, {"action": "book"})
+    assert appointment_confirmation_message(
+        "book",
+        {"status": "success", "status_code": 200, "data": {"success": True}},
+    ) == "आपका अपॉइंटमेंट बुक हो गया है, धन्यवाद।"
+    assert appointment_confirmation_message(
+        "book",
+        {
+            "status": "success",
+            "status_code": 200,
+            "data": {"success": True, "alreadyBooked": True},
+        },
+    ) == "आपकी अपॉइंटमेंट पहले से इसी समय पर बुक है, धन्यवाद।"
+    assert appointment_confirmation_message(
+        "reschedule",
+        {"status": "success", "status_code": 200, "data": {"success": True}},
+    ) == "आपकी अपॉइंटमेंट अपडेट हो गई है, धन्यवाद।"
+    assert not appointment_confirmation_message(
+        "book",
+        {"status": "success", "status_code": 400, "data": {"success": False}},
+    )
+    assert not appointment_confirmation_message(
+        "check",
+        {"status": "success", "status_code": 200, "data": {"success": True}},
+    )
     print("customer_action intent guard self-test passed")

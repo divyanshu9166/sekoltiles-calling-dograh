@@ -1159,19 +1159,18 @@ export default function CallsPage() {
               </div>
               <div>
                 <label htmlFor="appointment-time" className="text-sm text-muted mb-1 block">Time</label>
-                <select
+                <input
                   id="appointment-time"
                   name="time"
+                  type="time"
+                  min="09:00"
+                  max="17:00"
+                  step="300"
                   value={appointmentForm.time}
                   onChange={(event) => setAppointmentField('time', event.target.value)}
                   required
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
-                >
-                  <option value="">Select slot...</option>
-                  {['10:00 AM', '11:00 AM', '12:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM'].map((slot) => (
-                    <option key={slot} value={slot}>{slot}</option>
-                  ))}
-                </select>
+                />
               </div>
             </div>
             <div>
