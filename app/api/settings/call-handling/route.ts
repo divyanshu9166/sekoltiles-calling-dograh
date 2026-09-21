@@ -3,6 +3,7 @@ import { getCurrentAdmin } from '@/lib/auth'
 import { buildSekolDograhPrompt } from '@/lib/calling-agent/prompt.mjs'
 import { dograhUsesAri, updateDograhAgentPrompt, updateDograhHumanTransferDestination } from '@/lib/dograh'
 import { prisma } from '@/lib/db'
+import { getRegionPricing } from '@/lib/region-pricing'
 
 function normalizeE164(value: unknown) {
   if (typeof value !== 'string') return null
@@ -40,7 +41,10 @@ export async function PATCH(request: NextRequest) {
     }
     // Publish after the transfer destination, so a successful dashboard update
     // always leaves the agent prompt and live handoff routing in sync.
-    await updateDograhAgentPrompt(buildSekolDograhPrompt(transferPhone, { liveTransferEnabled }))
+    await updateDograhAgentPrompt(buildSekolDograhPrompt(transferPhone, {
+      liveTransferEnabled,
+      regionPricing: await getRegionPricing(),
+    }))
     await prisma.adminUser.update({ where: { id: user.id }, data: { transferPhone } })
 
     return NextResponse.json({ success: true, settings: { transferPhone } })

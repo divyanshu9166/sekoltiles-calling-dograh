@@ -1,4 +1,4 @@
-import { buildSekolDograhPrompt, DEFAULT_HUMAN_HANDOFF_NUMBER } from '../lib/calling-agent/prompt.mjs'
+import { buildSekolDograhPrompt, DEFAULT_HUMAN_HANDOFF_NUMBER, DEFAULT_REGION_PRICING } from '../lib/calling-agent/prompt.mjs'
 import pg from 'pg'
 
 const rawBase = process.env.DOGRAH_API_URL?.trim().replace(/\/+$/, '')
@@ -20,6 +20,23 @@ async function savedTransferNumber() {
   } catch (error) {
     console.warn('Could not load the dashboard transfer number; using CALL_TRANSFER_NUMBER fallback.', error.message)
     return null
+  } finally {
+    await client.end().catch(() => {})
+  }
+}
+
+async function savedRegionPricing() {
+  if (!process.env.DATABASE_URL) return DEFAULT_REGION_PRICING
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL, connectionTimeoutMillis: 2_000 })
+  try {
+    await client.connect()
+    const result = await client.query(
+      'SELECT "region", "price12x18", "price12x24" FROM "RegionPricing" ORDER BY "sortOrder" ASC, "id" ASC',
+    )
+    return result.rows.length ? result.rows : DEFAULT_REGION_PRICING
+  } catch (error) {
+    console.warn('Could not load dashboard region pricing; using protected defaults.', error.message)
+    return DEFAULT_REGION_PRICING
   } finally {
     await client.end().catch(() => {})
   }
@@ -144,6 +161,7 @@ const current = await api(`/workflow/fetch/${workflow.id}`)
 const existingPrompt = current.workflow_definition?.nodes?.find((node) => node.type === 'startCall')?.data?.prompt || ''
 const promptHandoffNumber = existingPrompt.match(/configured human handoff number\s+(\+[0-9 ()-]{7,})/i)?.[1]
 const dashboardHandoffNumber = await savedTransferNumber()
+const dashboardRegionPricing = await savedRegionPricing()
 const humanHandoffNumber = (dashboardHandoffNumber || explicitHandoffNumber || promptHandoffNumber || DEFAULT_HUMAN_HANDOFF_NUMBER).replace(/[\s().-]/g, '')
 if (!/^\+[1-9]\d{7,14}$/.test(humanHandoffNumber)) {
   throw new Error('CALL_TRANSFER_NUMBER must be a valid E.164 number such as +919726418181')
@@ -184,7 +202,10 @@ const definition = {
       position: { x: 160, y: 100 },
       data: {
         name: 'Sekol Tiles - Anushka',
-        prompt: buildSekolDograhPrompt(humanHandoffNumber, { liveTransferEnabled: isAriTelephony }),
+        prompt: buildSekolDograhPrompt(humanHandoffNumber, {
+          liveTransferEnabled: isAriTelephony,
+          regionPricing: dashboardRegionPricing,
+        }),
         greeting_type: 'text',
         greeting: 'नमस्ते! Sekol Tiles में आपका स्वागत है, मैं अनुष्का AI सहायक बोल रही हूँ। कैसे मदद करूँ?',
         allow_interrupt: true,

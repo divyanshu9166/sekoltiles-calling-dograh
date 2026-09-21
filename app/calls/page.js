@@ -47,6 +47,7 @@ import {
   PauseCircle,
   RefreshCw,
   Sheet,
+  IndianRupee,
 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
@@ -99,6 +100,10 @@ export default function CallsPage() {
   const [callHandlingLoading, setCallHandlingLoading] = useState(false);
   const [callHandlingMessage, setCallHandlingMessage] = useState('');
   const [callHandlingError, setCallHandlingError] = useState('');
+  const [regionPricing, setRegionPricing] = useState([]);
+  const [regionPricingLoading, setRegionPricingLoading] = useState(false);
+  const [regionPricingMessage, setRegionPricingMessage] = useState('');
+  const [regionPricingError, setRegionPricingError] = useState('');
 
   // AI Caller state
   const [agentStatus, setAgentStatus] = useState(null);
@@ -147,6 +152,18 @@ export default function CallsPage() {
     });
   };
 
+  const loadRegionPricing = async () => {
+    const response = await fetch('/api/settings/region-pricing', { cache: 'no-store' });
+    const result = await response.json();
+    if (response.status === 401) {
+      window.location.replace('/auth/login');
+      return [];
+    }
+    if (!response.ok) throw new Error(result.error || 'Could not load region pricing.');
+    setRegionPricing(result.regions || []);
+    return result.regions || [];
+  };
+
   const refreshCampaigns = async () => {
     const response = await fetch('/api/campaigns', { cache: 'no-store' });
     const result = await response.json();
@@ -184,6 +201,7 @@ export default function CallsPage() {
     });
     refreshAppointments();
     refreshCatalogueRequests();
+    loadRegionPricing().catch(() => {});
   }, []);
 
   // Auto-refresh while either calling mode is active.
@@ -276,6 +294,9 @@ export default function CallsPage() {
         setCallHandlingError(result.error || 'Could not load call handling settings.');
       })
       .catch(() => setCallHandlingError('Could not load call handling settings.'));
+    setRegionPricingError('');
+    setRegionPricingMessage('');
+    loadRegionPricing().catch((error) => setRegionPricingError(error.message || 'Could not load region pricing.'));
   }, [activeTab]);
 
   useEffect(() => () => {
@@ -343,6 +364,48 @@ export default function CallsPage() {
       setCallHandlingError('Unable to reach the server. Try again.');
     } finally {
       setCallHandlingLoading(false);
+    }
+  }
+
+  function updateRegionPrice(index, field, value) {
+    setRegionPricing((current) => current.map((item, itemIndex) => (
+      itemIndex === index ? { ...item, [field]: value } : item
+    )));
+  }
+
+  function addRegionPrice() {
+    setRegionPricing((current) => [...current, { region: '', price12x18: '', price12x24: '' }]);
+    setRegionPricingMessage('');
+    setRegionPricingError('');
+  }
+
+  function removeRegionPrice(index) {
+    setRegionPricing((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setRegionPricingMessage('');
+  }
+
+  async function handleRegionPricingSubmit(event) {
+    event.preventDefault();
+    setRegionPricingLoading(true);
+    setRegionPricingError('');
+    setRegionPricingMessage('');
+    try {
+      const response = await fetch('/api/settings/region-pricing', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ regions: regionPricing }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setRegionPricingError(result.error || 'Could not update region pricing.');
+        return;
+      }
+      setRegionPricing(result.regions || []);
+      setRegionPricingMessage('Region pricing saved and published to the live AI agent.');
+    } catch {
+      setRegionPricingError('Unable to reach the server. Try again.');
+    } finally {
+      setRegionPricingLoading(false);
     }
   }
 
@@ -1286,6 +1349,57 @@ export default function CallsPage() {
   const renderSettings = () => (
     <div className="max-w-2xl space-y-5">
       <div className="glass-card p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
+              <IndianRupee className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Region-wise tile pricing</h2>
+              <p className="text-sm text-muted mt-1">Manage the tax-paid prices Anushka quotes for each region or zone.</p>
+            </div>
+          </div>
+          <button type="button" onClick={addRegionPrice} className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-semibold text-foreground hover:border-accent/50">
+            <Plus className="w-4 h-4" /> Add region
+          </button>
+        </div>
+        <form onSubmit={handleRegionPricingSubmit} className="space-y-4">
+          <div className="space-y-3">
+            {regionPricing.map((item, index) => (
+              <div key={index} className="rounded-xl border border-border bg-surface/60 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted">Region {index + 1}</span>
+                  <button type="button" onClick={() => removeRegionPrice(index)} disabled={regionPricing.length === 1} aria-label={`Remove ${item.region || `region ${index + 1}`}`} className="rounded-lg p-1.5 text-muted hover:bg-red-500/10 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <label className="block">
+                  <span className="block text-xs font-medium text-foreground mb-1">Region / zone name</span>
+                  <input value={item.region} onChange={(event) => updateRegionPrice(index, 'region', event.target.value)} placeholder="e.g. Gujarat or Delhi/Punjab/Haryana" required maxLength={120} className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+                </label>
+                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="block text-xs font-medium text-foreground mb-1">बारह-अठारह price (₹)</span>
+                    <input type="number" min="1" max="1000000" step="1" value={item.price12x18} onChange={(event) => updateRegionPrice(index, 'price12x18', event.target.value)} required inputMode="numeric" className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs font-medium text-foreground mb-1">बारह-चौबीस price (₹)</span>
+                    <input type="number" min="1" max="1000000" step="1" value={item.price12x24} onChange={(event) => updateRegionPrice(index, 'price12x24', event.target.value)} required inputMode="numeric" className="w-full rounded-xl border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none focus:border-accent" />
+                  </label>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs leading-5 text-muted">Use <strong>/</strong> to group states with identical prices, for example Delhi/Punjab/Haryana. Changes apply to inbound, manual outbound and bulk campaign calls.</p>
+          {regionPricingError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600">{regionPricingError}</p>}
+          {regionPricingMessage && <p role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{regionPricingMessage}</p>}
+          <button type="submit" disabled={regionPricingLoading || regionPricing.length === 0} className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60 flex items-center gap-2">
+            {regionPricingLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {regionPricingLoading ? 'Publishing…' : 'Save region pricing'}
+          </button>
+        </form>
+      </div>
+      <div className="glass-card p-5 sm:p-6">
         <div className="flex items-start gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-accent/15 text-accent flex items-center justify-center flex-shrink-0">
             <PhoneForwarded className="w-5 h-5" />
@@ -1905,12 +2019,7 @@ export default function CallsPage() {
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
                 />
                 <datalist id="supported-pricing-regions">
-                  <option value="Odisha" />
-                  <option value="West Bengal" />
-                  <option value="Rajasthan" />
-                  <option value="Delhi" />
-                  <option value="Punjab" />
-                  <option value="Haryana" />
+                  {[...new Set(regionPricing.flatMap((item) => item.region.split('/').map((region) => region.trim())).filter(Boolean))].map((region) => <option key={region} value={region} />)}
                 </datalist>
                 <p className="mt-1 text-[11px] text-muted">If supplied, Anushka trusts this region, does not ask again, and uses its verified zone price.</p>
               </div>
