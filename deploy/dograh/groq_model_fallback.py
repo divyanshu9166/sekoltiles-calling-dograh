@@ -98,9 +98,8 @@ class FallbackGroqLLMService(GroqLLMService):
         self._fallback_active = True
         self._settings.model = self._fallback_model
         # GPT-OSS reasoning and function arguments share the completion budget.
-        # The primary voice model only needs 192 tokens, but that cap can cut a
-        # fallback tool call mid-JSON. Low reasoning plus 512 tokens leaves room
-        # for valid arguments without making the spoken response longer.
+        # The primary voice model uses low reasoning and a 384-token cap.  The
+        # fallback needs 512 tokens because tool arguments share that budget.
         self._settings.max_completion_tokens = self._fallback_max_completion_tokens
         self._settings.extra = {
             **self._settings.extra,

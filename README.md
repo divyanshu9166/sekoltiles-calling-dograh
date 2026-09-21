@@ -46,7 +46,7 @@ host gateway, applies the Groq completion limit, and keeps the model selected in
 Dograh as primary. Before any response chunk has been emitted, an HTTP 429,
 timeout, connection failure, or Groq 5xx switches that call to
 `DOGRAH_GROQ_FALLBACK_MODEL` (default `openai/gpt-oss-20b`) for its remaining
-turns. The primary model keeps a 192-token voice-response cap; the fallback uses
+turns. The primary model uses low reasoning with a 384-token voice-response cap; the fallback uses
 low reasoning and `DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS` (default 512) so
 appointment tool arguments are not truncated into invalid JSON. It never replays
 a partially emitted response. Provider credentials remain

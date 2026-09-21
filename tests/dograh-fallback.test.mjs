@@ -11,5 +11,6 @@ test('Dograh Groq fallback reserves enough output for one valid tool call', asyn
   assert.match(source, /"parallel_tool_calls": False/)
   assert.doesNotMatch(source, /"include_reasoning": False/)
   assert.match(override, /DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS:-512/)
-  assert.match(override, /max_completion_tokens=192/)
+  assert.match(override, /max_completion_tokens=384/)
+  assert.match(override, /extra=\{"reasoning_effort": "low", "parallel_tool_calls": False\}/)
 })
