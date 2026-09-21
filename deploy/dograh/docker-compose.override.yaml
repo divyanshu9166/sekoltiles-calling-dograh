@@ -15,6 +15,7 @@ services:
     volumes:
       - ./groq_model_fallback.py:/app/api/services/pipecat/groq_model_fallback.py:ro
       - ./transfer_consent_guard.py:/app/api/services/workflow/transfer_consent_guard.py:ro
+      - ./customer_action_intent_guard.py:/app/api/services/workflow/customer_action_intent_guard.py:ro
     command:
       - sh
       - -c
@@ -23,4 +24,5 @@ services:
         grep -q 'groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py || sed -i '/from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings/a from api.services.pipecat.groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py
         sed -i 's/return GroqLLMService(/return FallbackGroqLLMService(/' /app/api/services/pipecat/service_factory.py
         grep -q 'install_transfer_consent_guard(CustomToolManager)' /app/api/services/workflow/pipecat_engine_custom_tools.py || printf '\nfrom api.services.workflow.transfer_consent_guard import install_transfer_consent_guard\ninstall_transfer_consent_guard(CustomToolManager)\n' >> /app/api/services/workflow/pipecat_engine_custom_tools.py
+        grep -q 'install_customer_action_intent_guard(CustomToolManager)' /app/api/services/workflow/pipecat_engine_custom_tools.py || printf '\nfrom api.services.workflow.customer_action_intent_guard import install_customer_action_intent_guard\ninstall_customer_action_intent_guard(CustomToolManager)\n' >> /app/api/services/workflow/pipecat_engine_custom_tools.py
         exec ./scripts/start_services_docker.sh

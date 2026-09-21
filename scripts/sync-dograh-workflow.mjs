@@ -113,7 +113,7 @@ const trustedContextPresets = [
 
 const customerActionUuid = await upsertTool({
   name: 'customer_action',
-  description: 'ONLY check/book/reschedule a showroom appointment or record an agreed callback. NEVER use for catalogue/catalog/brochure requests; catalogue requests need no tool and no date/time.',
+  description: 'ONLY check/book/reschedule after the CUSTOMER explicitly requests an appointment, showroom visit, booking or slot; or record an explicitly agreed callback. Selecting a tile size or asking its price is NOT appointment intent. NEVER use for catalogue/catalog/brochure requests; catalogue requests need no tool and no date/time.',
   category: 'http_api', icon: 'phone-forwarded', icon_color: '#2563EB',
   definition: { schema_version: 1, type: 'http_api', config: {
     method: 'POST', url: `${crmPublicUrl}/api/agent/action`, credential_uuid: credentialUuid,
