@@ -30,6 +30,12 @@ _CATALOGUE = re.compile(
     r"\b(?:catalog|catalogue|brochure)\b|(?:कैटलॉग|कैटालॉग|ब्रोशर)",
     re.IGNORECASE,
 )
+_BOOKING_DETAIL_QUESTION = re.compile(
+    r"(?:किस\s*(?:दिन|तारीख|समय)|कितने\s*बजे|तारीख\s*बताइए|समय\s*बताइए|"
+    r"शोरूम(?:\s*में)?\s*आना|which\s*(?:day|date|time)|what\s*time|"
+    r"date\s*(?:and|or)?\s*time|when\s*(?:would|do).*(?:visit|come))",
+    re.IGNORECASE,
+)
 
 
 def _text(message: Any) -> str:
@@ -60,6 +66,34 @@ def _latest_user(messages: list[Any]) -> str:
     return ""
 
 
+def _booking_flow_active(messages: list[Any]) -> bool:
+    """Whether the latest reply is answering Anushka's booking-detail question.
+
+    A caller naturally says only "23 September, 3 baje" after being asked for
+    a date/time. That reply must retain the earlier explicit appointment intent;
+    requiring the word "appointment" again makes the agent fall back into the
+    sales pitch instead of continuing the booking.
+    """
+
+    if len(messages) < 2 or not _latest_user(messages):
+        return False
+
+    recent = messages[-12:-1]
+    user_requested_appointment = any(
+        isinstance(message, dict)
+        and message.get("role") == "user"
+        and _APPOINTMENT.search(_normalize(_text(message)))
+        for message in recent
+    )
+    agent_asked_for_detail = any(
+        isinstance(message, dict)
+        and message.get("role") == "assistant"
+        and _BOOKING_DETAIL_QUESTION.search(_normalize(_text(message)))
+        for message in recent
+    )
+    return user_requested_appointment and agent_asked_for_detail
+
+
 def customer_action_allowed(messages: list[Any], arguments: dict[str, Any]) -> bool:
     """Return whether the requested CRM action has customer intent behind it."""
 
@@ -72,16 +106,18 @@ def customer_action_allowed(messages: list[Any], arguments: dict[str, Any]) -> b
         return False
 
     if action == "check":
-        # Checking starts the appointment state machine, so the latest customer
-        # turn itself must explicitly request an appointment/showroom visit.
-        return bool(_APPOINTMENT.search(latest_user))
+        # Checking starts the appointment state machine. A direct request is
+        # valid, as is a date/time answer after we explicitly asked for it.
+        return bool(_APPOINTMENT.search(latest_user)) or _booking_flow_active(
+            messages
+        )
 
     if action in {"book", "reschedule"}:
         # Later date/time answers need not repeat "appointment".  Allow them
         # only if recent conversation already contains explicit appointment
         # intent from the customer or an appointment-specific assistant turn.
         recent = " ".join(_normalize(_text(item)) for item in messages[-10:])
-        return bool(_APPOINTMENT.search(recent))
+        return bool(_APPOINTMENT.search(recent)) or _booking_flow_active(messages)
 
     if action == "callback":
         recent = " ".join(_normalize(_text(item)) for item in messages[-8:])
@@ -206,9 +242,18 @@ if __name__ == "__main__":
         {"role": "assistant", "content": "किस दिन शोरूम आना चाहेंगे?"},
         {"role": "user", "content": "कल दो बजे"},
     ]
+    booking_date_in_hindi = appointment + [
+        {
+            "role": "assistant",
+            "content": "कृपया वह तारीख बताइए जब आप शोरूम में आना चाहेंगे।",
+        },
+        {"role": "user", "content": "तेईस सितंबर को तीन बजे आना चाहूंगा।"},
+    ]
     assert not customer_action_allowed(size_only, {"action": "check"})
     assert not customer_action_allowed(catalogue, {"action": "check"})
     assert customer_action_allowed(appointment, {"action": "check"})
+    assert customer_action_allowed(booking_date, {"action": "check"})
+    assert customer_action_allowed(booking_date_in_hindi, {"action": "check"})
     assert customer_action_allowed(booking_date, {"action": "book"})
     assert appointment_confirmation_message(
         "book",
