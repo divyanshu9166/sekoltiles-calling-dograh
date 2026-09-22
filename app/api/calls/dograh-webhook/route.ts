@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import type { CallStatus, Prisma } from '@prisma/client'
 import { requestedCatalogue } from '@/lib/catalogue/detection.mjs'
+import { isTerminalCampaignLifecycle } from '@/lib/campaigns/run-recovery.mjs'
 
 function toStatus(value: unknown): CallStatus {
   const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_')
@@ -65,6 +66,58 @@ async function loadTranscript(raw: unknown, transcriptUrl: string | null) {
   }
 }
 
+function positiveInteger(value: unknown): number | null {
+  const number = Number(value)
+  return Number.isInteger(number) && number > 0 ? number : null
+}
+
+async function finishCampaignLeadFromWebhook(input: {
+  campaignId: number | null
+  campaignLeadId: number | null
+  callLogId: number
+  runId: string
+  callStatus: CallStatus
+  outcome: string
+}) {
+  const { campaignId, campaignLeadId, callLogId, runId, callStatus, outcome } = input
+  if (!campaignLeadId) return
+
+  const now = new Date()
+  await prisma.$transaction(async tx => {
+    const lead = await tx.campaignLead.findFirst({
+      where: {
+        id: campaignLeadId,
+        ...(campaignId ? { campaignId } : {}),
+        status: 'CALLING',
+        OR: [
+          { callLogId },
+          ...(runId ? [{ dograhRunId: runId }] : []),
+        ],
+      },
+      include: { campaign: true },
+    })
+    if (!lead) return
+
+    const leadStatus = callStatus === 'COMPLETED' ? 'COMPLETED' : 'FAILED'
+    const completed = await tx.campaignLead.updateMany({
+      where: { id: lead.id, status: 'CALLING' },
+      data: {
+        status: leadStatus,
+        outcome,
+        completedAt: now,
+        lastError: leadStatus === 'FAILED' ? outcome : null,
+      },
+    })
+    if (!completed.count) return
+
+    await tx.marketingCampaign.update({
+      where: { id: lead.campaignId },
+      data: { nextCallAt: new Date(now.getTime() + lead.campaign.interCallDelaySec * 1000) },
+    })
+    console.info(`[campaign-webhook] campaign=${lead.campaignId} lead=${lead.id} finished status=${leadStatus}`)
+  })
+}
+
 export async function POST(req: NextRequest) {
   if (req.headers.get('x-api-secret') !== process.env.CRM_API_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -114,9 +167,11 @@ export async function POST(req: NextRequest) {
 
     if (!callLog) return NextResponse.json({ error: 'Call log not found' }, { status: 404 })
 
-    const rawOutcome = body.mapped_disposition || body.call_disposition || body.disposition
+    const explicitLifecycle = body.mapped_disposition || body.call_disposition || body.disposition
       || gatheredContext.mapped_call_disposition || gatheredContext.call_disposition
-      || gatheredContext.call_status || body.call_status || 'Completed'
+      || gatheredContext.call_status || body.call_status
+    const rawOutcome = explicitLifecycle || 'Completed'
+    const callStatus = toStatus(body.call_status || gatheredContext.call_status || rawOutcome)
     const durationSec = Math.max(0, Math.round(Number(body.duration || body.duration_seconds || 0)))
     const recordingUrl = typeof body.recording_url === 'string' && body.recording_url ? body.recording_url : null
     const transcriptUrl = typeof body.transcript_url === 'string' && body.transcript_url ? body.transcript_url : null
@@ -126,7 +181,7 @@ export async function POST(req: NextRequest) {
       where: { id: callLog.id },
       data: {
         dograhRunId: runId || callLog.dograhRunId,
-        status: toStatus(body.call_status || gatheredContext.call_status || rawOutcome),
+        status: callStatus,
         durationSec,
         duration: `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`,
         outcome: String(rawOutcome),
@@ -139,6 +194,20 @@ export async function POST(req: NextRequest) {
         notes: `Synced from Dograh run ${runId || callLog.dograhRunId || 'unknown'}`,
       },
     })
+
+    // Campaign calls normally advance from the worker's run poll. This handles
+    // real hangup/transfer webhooks immediately, so a missed or delayed run
+    // completion event cannot keep the rest of the queue waiting.
+    if (isTerminalCampaignLifecycle(explicitLifecycle)) {
+      await finishCampaignLeadFromWebhook({
+        campaignId: positiveInteger(initialContext.campaign_id),
+        campaignLeadId: positiveInteger(initialContext.campaign_lead_id),
+        callLogId: callLog.id,
+        runId,
+        callStatus,
+        outcome: String(rawOutcome),
+      })
+    }
 
     if (messages) {
       await prisma.callTranscript.upsert({

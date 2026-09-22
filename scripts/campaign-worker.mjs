@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { isStaleCampaignRun } from '../lib/campaigns/run-recovery.mjs'
 
 const requiredEnvironment = ['DATABASE_URL', 'DOGRAH_API_URL', 'DOGRAH_API_KEY', 'DOGRAH_WORKFLOW_UUID']
 for (const name of requiredEnvironment) {
@@ -34,6 +35,7 @@ function dograhOutboundDialTarget(phoneNumber) {
   return `PJSIP/${phoneNumber}@${trunkEndpoint}`
 }
 const pollIntervalMs = 3000
+const campaignRunTimeoutMs = Math.max(120, Number(process.env.CAMPAIGN_STALE_RUN_SEC || 600)) * 1000
 let stopping = false
 let workflowId
 
@@ -130,6 +132,25 @@ async function finishLead(lead, run) {
   console.log(`[campaign-worker] campaign=${lead.campaignId} lead=${lead.id} finished status=${leadStatus}`)
 }
 
+async function recoverStaleLead(lead, reason) {
+  const now = new Date()
+  await prisma.$transaction([
+    prisma.campaignLead.update({
+      where: { id: lead.id },
+      data: { status: 'FAILED', outcome: 'campaign_run_timeout', completedAt: now, lastError: reason },
+    }),
+    ...(lead.callLogId ? [prisma.callLog.update({
+      where: { id: lead.callLogId },
+      data: { status: 'FAILED', outcome: 'Campaign call did not close in time', notes: reason },
+    })] : []),
+    prisma.marketingCampaign.update({
+      where: { id: lead.campaignId },
+      data: { nextCallAt: new Date(now.getTime() + lead.campaign.interCallDelaySec * 1000) },
+    }),
+  ])
+  console.warn(`[campaign-worker] campaign=${lead.campaignId} lead=${lead.id} recovered stale run`)
+}
+
 async function reconcileActiveLead() {
   const lead = await prisma.campaignLead.findFirst({
     where: { status: 'CALLING' },
@@ -141,16 +162,16 @@ async function reconcileActiveLead() {
   if (!lead.dograhRunId) {
     const staleBefore = new Date(Date.now() - 2 * 60_000)
     if (lead.startedAt && lead.startedAt < staleBefore) {
-      await prisma.campaignLead.update({
-        where: { id: lead.id },
-        data: { status: 'FAILED', completedAt: new Date(), lastError: 'Worker interrupted before Dograh accepted the call.' },
-      })
+      await recoverStaleLead(lead, 'Worker interrupted before Dograh accepted the call.')
     }
     return true
   }
 
   const run = await dograhRequest(`/workflow/${await getWorkflowId()}/runs/${encodeURIComponent(lead.dograhRunId)}`)
   if (run.is_completed) await finishLead(lead, run)
+  else if (isStaleCampaignRun(lead.startedAt, Date.now(), campaignRunTimeoutMs)) {
+    await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(campaignRunTimeoutMs / 60_000)} minutes.`)
+  }
   return true
 }
 
