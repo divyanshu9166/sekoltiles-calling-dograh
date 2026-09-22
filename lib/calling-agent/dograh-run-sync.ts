@@ -87,6 +87,10 @@ async function persistRun(run: DograhWorkflowRun) {
     })
   }
 
+  // A user may remove a completed call from CRM while its Dograh run remains
+  // available for reconciliation. Keep that deletion durable across refreshes.
+  if (callLog.deletedAt) return
+
   const durationSec = Math.max(0, Math.round(Number(run.cost_info?.call_duration_seconds || 0)))
   const messages = transcriptFromDograhEvents(run.logs?.realtime_feedback_events)
   await prisma.callLog.update({
@@ -104,7 +108,7 @@ async function persistRun(run: DograhWorkflowRun) {
     },
   })
 
-  if (messages.length) {
+  if (messages.length && !callLog.transcriptDeletedAt) {
     const data = {
       summary: outcome(run).replace(/_/g, ' '),
       sentiment: 'Neutral',
@@ -141,7 +145,8 @@ export async function syncRecentDograhRuns(force = false) {
         || summary.call_type === 'inbound'
       if (!isSekolRun) return false
       const call = byRunId.get(String(summary.id))
-      return !call || !call.transcript || !call.recordingUrl || !['COMPLETED', 'FAILED', 'MISSED', 'NO_ANSWER', 'BUSY'].includes(call.status)
+      if (call?.deletedAt) return false
+      return !call || (!call.transcript && !call.transcriptDeletedAt) || !call.recordingUrl || !['COMPLETED', 'FAILED', 'MISSED', 'NO_ANSWER', 'BUSY'].includes(call.status)
     })
     for (let index = 0; index < pending.length; index += 5) {
       await Promise.all(pending.slice(index, index + 5).map(async summary => {

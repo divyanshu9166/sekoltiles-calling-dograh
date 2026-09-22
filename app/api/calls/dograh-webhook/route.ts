@@ -166,6 +166,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (!callLog) return NextResponse.json({ error: 'Call log not found' }, { status: 404 })
+    // Do not restore records that were manually removed from the CRM when a
+    // webhook is retried by Dograh after completion.
+    if (callLog.deletedAt) return NextResponse.json({ success: true, data: { id: callLog.id, deleted: true } })
 
     const explicitLifecycle = body.mapped_disposition || body.call_disposition || body.disposition
       || gatheredContext.mapped_call_disposition || gatheredContext.call_disposition
@@ -209,7 +212,7 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    if (messages) {
+    if (messages && !callLog.transcriptDeletedAt) {
       await prisma.callTranscript.upsert({
         where: { callLogId: callLog.id },
         update: {

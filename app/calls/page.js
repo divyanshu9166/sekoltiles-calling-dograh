@@ -48,6 +48,7 @@ import {
   RefreshCw,
   Sheet,
   IndianRupee,
+  Trash2,
 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
@@ -55,6 +56,14 @@ import ThemeToggle from '@/components/ThemeToggle';
 import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
 import { createAppointment, getAppointments, updateAppointmentStatus } from '@/app/actions/appointments';
 import { getCatalogueRequests } from '@/app/actions/catalogue';
+import {
+  deleteAppointments,
+  deleteCallLogs,
+  deleteCatalogueRequests,
+  deletePhoneBookEntries,
+  deleteTranscripts,
+  getPhoneBook,
+} from '@/app/actions/records';
 
 const TABS = [
   { id: 'ai-caller', label: 'AI Caller', icon: Bot },
@@ -89,6 +98,10 @@ export default function CallsPage() {
   const [expandedTranscript, setExpandedTranscript] = useState(null);
   const [appointments, setAppointments] = useState([]);
   const [catalogueRequests, setCatalogueRequests] = useState([]);
+  const [phoneBook, setPhoneBook] = useState([]);
+  const [selectedRecordIds, setSelectedRecordIds] = useState({ logs: [], phonebook: [], transcripts: [], catalogue: [], appointments: [] });
+  const [deletingRecords, setDeletingRecords] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState('');
   const [appointmentForm, setAppointmentForm] = useState(EMPTY_APPOINTMENT);
   const [appointmentLoading, setAppointmentLoading] = useState(false);
   const [appointmentMessage, setAppointmentMessage] = useState('');
@@ -152,6 +165,12 @@ export default function CallsPage() {
     });
   };
 
+  const refreshPhoneBook = () => {
+    getPhoneBook().then(res => {
+      if (res.success) setPhoneBook(res.data);
+    });
+  };
+
   const loadRegionPricing = async () => {
     const response = await fetch('/api/settings/region-pricing', { cache: 'no-store' });
     const result = await response.json();
@@ -201,6 +220,7 @@ export default function CallsPage() {
     });
     refreshAppointments();
     refreshCatalogueRequests();
+    refreshPhoneBook();
     loadRegionPricing().catch(() => {});
   }, []);
 
@@ -236,6 +256,10 @@ export default function CallsPage() {
 
   useEffect(() => {
     if (activeTab === 'catalogue') refreshCatalogueRequests();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'phonebook') refreshPhoneBook();
   }, [activeTab]);
 
   useEffect(() => {
@@ -496,17 +520,87 @@ export default function CallsPage() {
     }
   }
 
-  // Derive phone book from call logs
-  const phoneBook = useMemo(() => {
-    const map = {};
-    callLogs.forEach(c => {
-      if (!map[c.phone]) {
-        map[c.phone] = { name: c.customer, phone: c.phone, totalCalls: 0, lastCall: c.date, tag: 'Customer' };
-      }
-      map[c.phone].totalCalls++;
+  const selectedFor = (section) => selectedRecordIds[section] || [];
+
+  const toggleRecordSelection = (section, id) => {
+    setSelectedRecordIds((current) => {
+      const selected = current[section] || [];
+      const next = selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
+      return { ...current, [section]: next };
     });
-    return Object.values(map);
-  }, [callLogs]);
+  };
+
+  const toggleSelectAllRecords = (section, ids) => {
+    setSelectedRecordIds((current) => {
+      const selected = current[section] || [];
+      const allSelected = ids.length > 0 && ids.every((id) => selected.includes(id));
+      return { ...current, [section]: allSelected ? selected.filter((id) => !ids.includes(id)) : [...new Set([...selected, ...ids])] };
+    });
+  };
+
+  const deleteSelectedRecords = async (section, label, explicitIds = null) => {
+    const ids = explicitIds || selectedFor(section);
+    if (!ids.length || deletingRecords) return;
+    if (!window.confirm(`Delete ${ids.length} selected ${label}${ids.length === 1 ? '' : 's'}?`)) return;
+
+    const actions = {
+      logs: deleteCallLogs,
+      phonebook: deletePhoneBookEntries,
+      transcripts: deleteTranscripts,
+      catalogue: deleteCatalogueRequests,
+      appointments: deleteAppointments,
+    };
+    setDeletingRecords(true);
+    setDeleteMessage('');
+    try {
+      const result = await actions[section](ids);
+      if (!result.success) throw new Error(result.error || `Could not delete ${label}s.`);
+      setSelectedRecordIds((current) => ({ ...current, [section]: [] }));
+      setDeleteMessage(result.message || 'Selected records deleted.');
+      if (section === 'logs' || section === 'transcripts') {
+        setSelectedCall(null);
+        setExpandedTranscript(null);
+        refreshLogs();
+      }
+      if (section === 'phonebook') {
+        setSelectedContact(null);
+        refreshPhoneBook();
+      }
+      if (section === 'catalogue') refreshCatalogueRequests();
+      if (section === 'appointments') refreshAppointments();
+    } catch (error) {
+      setDeleteMessage(error.message || `Could not delete ${label}s.`);
+    } finally {
+      setDeletingRecords(false);
+    }
+  };
+
+  const renderDeleteControls = (section, ids, label) => {
+    const selected = selectedFor(section);
+    const allSelected = ids.length > 0 && ids.every((id) => selected.includes(id));
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => toggleSelectAllRecords(section, ids)}
+          disabled={!ids.length || deletingRecords}
+          className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {allSelected ? 'Clear selection' : 'Select all'}
+        </button>
+        {selected.length > 0 && (
+          <button
+            type="button"
+            onClick={() => deleteSelectedRecords(section, label)}
+            disabled={deletingRecords}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" /> Delete selected ({selected.length})
+          </button>
+        )}
+      </div>
+    );
+  };
 
   // Derive transcripts from call logs with transcripts
   const callTranscripts = useMemo(() => {
@@ -753,6 +847,11 @@ export default function CallsPage() {
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {renderDeleteControls('logs', filteredLogs.map((call) => call.id), 'call log')}
+        {deleteMessage && <p role="status" className="text-xs text-muted">{deleteMessage}</p>}
+      </div>
+
       {/* Call Logs Table */}
       {/* Mobile-friendly card list (visible on small screens) */}
       <div className="space-y-3 md:hidden">
@@ -761,6 +860,14 @@ export default function CallsPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select call log for ${call.customer}`}
+                    checked={selectedFor('logs').includes(call.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => toggleRecordSelection('logs', call.id)}
+                    className="h-4 w-4 accent-[var(--accent)]"
+                  />
                   {getDirectionIcon(call.direction)}
                   <p className="text-sm font-semibold text-foreground truncate">{call.customer}</p>
                 </div>
@@ -795,6 +902,13 @@ export default function CallsPage() {
                 >
                   <Phone className="w-4 h-4" />
                 </button>
+                <button
+                  className="touch-target flex items-center justify-center rounded-xl bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors"
+                  title="Delete call log"
+                  onClick={(event) => { event.stopPropagation(); deleteSelectedRecords('logs', 'call log', [call.id]); }}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -806,6 +920,7 @@ export default function CallsPage() {
           <table className="crm-table">
             <thead>
               <tr>
+                <th>Select</th>
                 <th>Direction</th>
                 <th>Customer</th>
                 <th>Phone</th>
@@ -820,6 +935,15 @@ export default function CallsPage() {
             <tbody>
               {filteredLogs.map((call) => (
                 <tr key={call.id} className="cursor-pointer" onClick={() => setSelectedCall(call)}>
+                  <td onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select call log for ${call.customer}`}
+                      checked={selectedFor('logs').includes(call.id)}
+                      onChange={() => toggleRecordSelection('logs', call.id)}
+                      className="h-4 w-4 accent-[var(--accent)]"
+                    />
+                  </td>
                   <td>
                     <div className="flex items-center gap-2">
                       {getDirectionIcon(call.direction)}
@@ -853,6 +977,13 @@ export default function CallsPage() {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <Phone className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        className="p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors"
+                        title="Delete call log"
+                        onClick={(event) => { event.stopPropagation(); deleteSelectedRecords('logs', 'call log', [call.id]); }}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>
@@ -938,16 +1069,29 @@ export default function CallsPage() {
         </button>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {renderDeleteControls('phonebook', filteredPhoneBook.map((contact) => contact.id), 'phone book entry')}
+        {deleteMessage && <p role="status" className="text-xs text-muted">{deleteMessage}</p>}
+      </div>
+
       {/* Phone Book Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredPhoneBook.map((contact) => (
           <div
-            key={contact.phone || contact.name}
+            key={contact.id}
             className="glass-card p-4 cursor-pointer hover:border-accent/30 transition-all"
             onClick={() => setSelectedContact(contact)}
           >
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  aria-label={`Select contact ${contact.name}`}
+                  checked={selectedFor('phonebook').includes(contact.id)}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={() => toggleRecordSelection('phonebook', contact.id)}
+                  className="h-4 w-4 accent-[var(--accent)]"
+                />
                 <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
                   <User className="w-5 h-5 text-accent" />
                 </div>
@@ -956,7 +1100,17 @@ export default function CallsPage() {
                   <p className="text-xs text-muted">{contact.phone}</p>
                 </div>
               </div>
-              {getTagBadge(contact.tag)}
+              <div className="flex items-center gap-2">
+                {getTagBadge(contact.tag)}
+                <button
+                  type="button"
+                  title="Delete phone book entry"
+                  onClick={(event) => { event.stopPropagation(); deleteSelectedRecords('phonebook', 'phone book entry', [contact.id]); }}
+                  className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             {contact.email && (
               <div className="flex items-center gap-2 text-xs text-muted mb-2">
@@ -989,6 +1143,11 @@ export default function CallsPage() {
         />
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        {renderDeleteControls('transcripts', filteredTranscripts.map((transcript) => transcript.id), 'transcript')}
+        {deleteMessage && <p role="status" className="text-xs text-muted">{deleteMessage}</p>}
+      </div>
+
       <div className="space-y-3">
         {filteredTranscripts.length === 0 && (
           <div className="glass-card p-8 text-center">
@@ -1008,6 +1167,14 @@ export default function CallsPage() {
             >
               <div className="flex flex-wrap items-center justify-between gap-y-2">
                 <div className="flex items-center gap-2 min-w-0">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select transcript for ${transcript.customer}`}
+                    checked={selectedFor('transcripts').includes(transcript.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    onChange={() => toggleRecordSelection('transcripts', transcript.id)}
+                    className="h-4 w-4 accent-[var(--accent)]"
+                  />
                   {expandedTranscript === transcript.id ? (
                     <ChevronDown className="w-4 h-4 text-muted flex-shrink-0" />
                   ) : (
@@ -1028,6 +1195,14 @@ export default function CallsPage() {
                     <Clock className="w-3 h-3" />
                     {transcript.duration}
                   </span>
+                  <button
+                    type="button"
+                    title="Delete transcript"
+                    onClick={(event) => { event.stopPropagation(); deleteSelectedRecords('transcripts', 'transcript', [transcript.id]); }}
+                    className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </div>
               </div>
               <p className="text-sm text-muted mt-2 ml-7">{transcript.summary}</p>
@@ -1229,8 +1404,12 @@ export default function CallsPage() {
                 <Calendar className="w-5 h-5 text-accent" />
                 Saved Appointments
               </h3>
-              <button type="button" onClick={refreshAppointments} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground">Refresh</button>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {renderDeleteControls('appointments', appointments.map((appointment) => appointment.id), 'appointment')}
+                <button type="button" onClick={refreshAppointments} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground">Refresh</button>
+              </div>
             </div>
+            {deleteMessage && <p role="status" className="mb-3 text-xs text-muted">{deleteMessage}</p>}
             <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
               {appointments.length === 0 ? (
                 <div className="glass-card p-8 text-center text-sm text-muted">No appointments saved yet. Agent bookings will appear here automatically.</div>
@@ -1239,6 +1418,13 @@ export default function CallsPage() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select appointment for ${appointment.customer}`}
+                          checked={selectedFor('appointments').includes(appointment.id)}
+                          onChange={() => toggleRecordSelection('appointments', appointment.id)}
+                          className="h-4 w-4 accent-[var(--accent)]"
+                        />
                         <h4 className="font-semibold text-foreground">{appointment.customer}</h4>
                         {appointment.notes?.toLowerCase().includes('ai agent') && (
                           <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">AI BOOKED</span>
@@ -1246,7 +1432,17 @@ export default function CallsPage() {
                       </div>
                       <p className="text-xs text-muted">{appointment.phone}</p>
                     </div>
-                    <span className={`rounded-full border px-2 py-1 text-xs ${appointment.status === 'Completed' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700' : appointment.status === 'Cancelled' ? 'border-red-500/20 bg-red-500/10 text-red-700' : 'border-amber-500/20 bg-amber-500/10 text-amber-700'}`}>{appointment.status}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full border px-2 py-1 text-xs ${appointment.status === 'Completed' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700' : appointment.status === 'Cancelled' ? 'border-red-500/20 bg-red-500/10 text-red-700' : 'border-amber-500/20 bg-amber-500/10 text-amber-700'}`}>{appointment.status}</span>
+                      <button
+                        type="button"
+                        title="Delete appointment"
+                        onClick={() => deleteSelectedRecords('appointments', 'appointment', [appointment.id])}
+                        className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-surface p-3 text-sm">
                     <span>{appointment.date}</span>
@@ -1319,8 +1515,12 @@ export default function CallsPage() {
               <p className="text-sm text-muted mt-1">Leads who explicitly requested a catalogue during an AI call. Share the catalogue manually from WhatsApp.</p>
             </div>
           </div>
-          <button type="button" onClick={refreshCatalogueRequests} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground">Refresh</button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {renderDeleteControls('catalogue', catalogueRequests.map((request) => request.id), 'catalogue request')}
+            <button type="button" onClick={refreshCatalogueRequests} className="rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-muted hover:text-foreground">Refresh</button>
+          </div>
         </div>
+        {deleteMessage && <p role="status" className="mt-3 text-xs text-muted">{deleteMessage}</p>}
       </div>
 
       <div className="space-y-3">
@@ -1331,13 +1531,30 @@ export default function CallsPage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select catalogue request for ${request.customer}`}
+                    checked={selectedFor('catalogue').includes(request.id)}
+                    onChange={() => toggleRecordSelection('catalogue', request.id)}
+                    className="h-4 w-4 accent-[var(--accent)]"
+                  />
                   <h3 className="font-semibold text-foreground">{request.customer}</h3>
                   <span className="rounded-full border border-accent/20 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">CATALOGUE REQUESTED</span>
                 </div>
                 <p className="mt-1 text-sm text-muted">{request.phone}</p>
                 {request.region && <p className="mt-1 text-xs text-muted">Region / Zone: {request.region}</p>}
               </div>
-              <span className="text-right text-xs text-muted">{request.requestedAt}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-right text-xs text-muted">{request.requestedAt}</span>
+                <button
+                  type="button"
+                  title="Delete catalogue request"
+                  onClick={() => deleteSelectedRecords('catalogue', 'catalogue request', [request.id])}
+                  className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         ))}

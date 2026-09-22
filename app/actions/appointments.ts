@@ -14,6 +14,7 @@ import { getCurrentAdmin } from '@/lib/auth'
 export async function getAppointments() {
   if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.', data: [] }
   const appointments = await prisma.appointment.findMany({
+    where: { deletedAt: null },
     include: { contact: true },
     orderBy: [{ date: 'asc' }, { time: 'asc' }],
   })
@@ -81,13 +82,15 @@ export async function updateAppointmentStatus(id: number, status: string) {
   if (!['Scheduled', 'Completed', 'Cancelled'].includes(status)) {
     return { success: false, error: 'Unsupported appointment status.' }
   }
-  const appointment = await prisma.appointment.update({
-    where: { id },
+  const appointment = await prisma.appointment.updateMany({
+    where: { id, deletedAt: null },
     data: { status },
   })
 
+  if (!appointment.count) return { success: false, error: 'Appointment was not found.' }
+
   revalidatePath('/calls')
-  return { success: true, data: appointment }
+  return { success: true }
 }
 
 export async function cancelAppointment(id: number) {

@@ -17,6 +17,7 @@ export async function getCallLogs() {
     console.error('Dograh call reconciliation failed:', error)
   }
   const calls = await prisma.callLog.findMany({
+    where: { deletedAt: null },
     include: { contact: true, transcript: true },
     orderBy: { date: 'desc' },
   })
@@ -43,7 +44,7 @@ export async function getCallLogs() {
       transcriptUrl: c.transcriptUrl,
       aiHandled: c.aiHandled,
       callType: c.callType,
-      transcript: c.transcript ? {
+      transcript: c.transcript && !c.transcriptDeletedAt ? {
         summary: c.transcript.summary,
         sentiment: c.transcript.sentiment,
         messages: c.transcript.messages,

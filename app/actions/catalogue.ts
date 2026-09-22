@@ -7,6 +7,7 @@ export async function getCatalogueRequests() {
   if (!await getCurrentAdmin()) return { success: false, error: 'Unauthorized.', data: [] }
 
   const requests = await prisma.catalogueRequest.findMany({
+    where: { deletedAt: null, callLog: { deletedAt: null } },
     orderBy: { requestedAt: 'desc' },
   })
 

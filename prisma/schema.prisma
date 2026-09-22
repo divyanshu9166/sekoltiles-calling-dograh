@@ -22,6 +22,17 @@ model Contact {
   callLogs     CallLog[]
 }
 
+model PhoneBookEntry {
+  id         Int       @id @default(autoincrement())
+  phone      String    @unique
+  name       String
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([archivedAt, updatedAt])
+}
+
 model Appointment {
   id        Int      @id @default(autoincrement())
   contactId Int
@@ -34,12 +45,14 @@ model Appointment {
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@index([date])
   @@index([status])
   @@index([date, time])
   @@index([contactId, status, date])
   @@index([date, status])
+  @@index([deletedAt])
 }
 
 enum CallDirection {
@@ -81,11 +94,14 @@ model CallLog {
   transcriptUrl String?
   callType      String?        @default("manual")
   aiHandled     Boolean        @default(false)
+  deletedAt     DateTime?
+  transcriptDeletedAt DateTime?
   transcript    CallTranscript?
   catalogueRequest CatalogueRequest?
 
   @@index([date])
   @@index([contactId])
+  @@index([deletedAt])
 }
 
 model CatalogueRequest {
@@ -96,8 +112,10 @@ model CatalogueRequest {
   phone     String
   region    String?
   requestedAt DateTime @default(now())
+  deletedAt   DateTime?
 
   @@index([requestedAt])
+  @@index([deletedAt])
 }
 
 model CallTranscript {
