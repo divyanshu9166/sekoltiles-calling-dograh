@@ -35,7 +35,13 @@ function dograhOutboundDialTarget(phoneNumber) {
   return `PJSIP/${phoneNumber}@${trunkEndpoint}`
 }
 const pollIntervalMs = 3000
-const campaignRunTimeoutMs = Math.max(120, Number(process.env.CAMPAIGN_STALE_RUN_SEC || 600)) * 1000
+// Two minutes is ample for an unanswered/abandoned campaign call, while keeping
+// the queue moving if ARI never emits its final hangup event. Existing calls at
+// worker startup keep the former ten-minute grace period so a deploy/restart
+// cannot cut off a real conversation that was already underway.
+const campaignRunTimeoutMs = Math.max(120, Number(process.env.CAMPAIGN_STALE_RUN_SEC || 120)) * 1000
+const preRestartRunTimeoutMs = Math.max(campaignRunTimeoutMs, 10 * 60_000)
+const workerStartedAt = Date.now()
 let stopping = false
 let workflowId
 
@@ -169,8 +175,15 @@ async function reconcileActiveLead() {
 
   const run = await dograhRequest(`/workflow/${await getWorkflowId()}/runs/${encodeURIComponent(lead.dograhRunId)}`)
   if (run.is_completed) await finishLead(lead, run)
-  else if (isStaleCampaignRun(lead.startedAt, Date.now(), campaignRunTimeoutMs)) {
-    await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(campaignRunTimeoutMs / 60_000)} minutes.`)
+  else {
+    const startedAt = lead.startedAt ? new Date(lead.startedAt).getTime() : 0
+    const timeoutMs = startedAt && startedAt < workerStartedAt
+      ? preRestartRunTimeoutMs
+      : campaignRunTimeoutMs
+
+    if (isStaleCampaignRun(lead.startedAt, Date.now(), timeoutMs)) {
+      await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(timeoutMs / 60_000)} minutes.`)
+    }
   }
   return true
 }
