@@ -45,6 +45,16 @@ _TRANSFER_OFFER = re.compile(
     re.IGNORECASE,
 )
 
+# This exact phrase is used only when Anushka cannot answer from verified
+# business data or cannot understand the caller after one clarification. It is
+# deliberately separate from a normal transfer offer: the user asked for a
+# direct human fallback instead of another loop or a silent call.
+_UNANSWERED_HANDOFF = re.compile(
+    r"मुझे\s+इस\s+जानकारी\s+की\s+पुष्टि\s+हमारी\s+टीम\s+से\s+करानी\s+होगी"
+    r"|i\s+(?:cannot|can.t)\s+(?:verify|answer|understand).{0,80}(?:team|human)",
+    re.IGNORECASE,
+)
+
 _AFFIRMATIVE = re.compile(
     r"^(?:yes|yeah|yep|yup|ok|okay|sure|haan|han|haa|ha|"
     r"bilkul|zaroor|जरूर|ज़रूर|हाँ|हां|हा|जी|ठीक\s*है|बिल्कुल)"
@@ -96,6 +106,8 @@ def transfer_consent_decision(messages: list[Any]) -> tuple[str, str]:
     if any(re.search(pattern, normalized_user, re.IGNORECASE) for pattern in _NEGATIVE_PATTERNS):
         return "deny", latest_user
     if _DIRECT_HUMAN_REQUEST.search(normalized_user):
+        return "allow", latest_user
+    if _UNANSWERED_HANDOFF.search(latest_assistant):
         return "allow", latest_user
     if _TRANSFER_OFFER.search(latest_assistant) and _AFFIRMATIVE.fullmatch(normalized_user):
         return "allow", latest_user
@@ -228,6 +240,10 @@ if __name__ == "__main__":
     assert transfer_consent_decision(
         [{"role": "user", "content": "human agent se baat karwa do"}]
     )[0] == "allow"
+    assert transfer_consent_decision([
+        {"role": "assistant", "content": "मुझे इस जानकारी की पुष्टि हमारी टीम से करानी होगी।"},
+        {"role": "user", "content": "GST plus hai?"},
+    ])[0] == "allow"
     class FakeContext:
         messages = [offer, {"role": "user", "content": "रहने तो"}]
 

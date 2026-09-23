@@ -14,6 +14,7 @@ services:
       DOGRAH_GROQ_PRIMARY_MAX_REQUESTS: ${DOGRAH_GROQ_PRIMARY_MAX_REQUESTS:-3}
     volumes:
       - ./groq_model_fallback.py:/app/api/services/pipecat/groq_model_fallback.py:ro
+      - ./sarvam_saaras_v4.py:/app/api/services/pipecat/sarvam_saaras_v4.py:ro
       - ./transfer_consent_guard.py:/app/api/services/workflow/transfer_consent_guard.py:ro
       - ./customer_action_intent_guard.py:/app/api/services/workflow/customer_action_intent_guard.py:ro
     command:
@@ -23,6 +24,9 @@ services:
         sed -i -E 's/GroqLLMSettings\(model=model, temperature=0\.1(, max_completion_tokens=[0-9]+)?(, extra=\{[^}]+\})?\)/GroqLLMSettings(model=model, temperature=0.1, max_completion_tokens=384, extra={"reasoning_effort": "low", "parallel_tool_calls": False})/' /app/api/services/pipecat/service_factory.py
         grep -q 'groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py || sed -i '/from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings/a from api.services.pipecat.groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py
         sed -i 's/return GroqLLMService(/return FallbackGroqLLMService(/' /app/api/services/pipecat/service_factory.py
+        grep -q 'install_saaras_v4()' /app/api/services/pipecat/service_factory.py || sed -i '/from pipecat.services.sarvam.stt import SarvamSTTService, SarvamSTTSettings/a from api.services.pipecat.sarvam_saaras_v4 import install_saaras_v4\ninstall_saaras_v4()' /app/api/services/pipecat/service_factory.py
+        sed -i 's/SARVAM_STT_MODELS = ("saarika:v2.5", "saaras:v3")/SARVAM_STT_MODELS = ("saarika:v2.5", "saaras:v3", "saaras:v4")/' /app/api/services/configuration/options/sarvam.py
+        grep -q '"saaras:v4": SARVAM_STT_LANGUAGES_V3' /app/api/services/configuration/registry.py || sed -i '/"saaras:v3": SARVAM_STT_LANGUAGES_V3,/a\                "saaras:v4": SARVAM_STT_LANGUAGES_V3,' /app/api/services/configuration/registry.py
         grep -q 'install_transfer_consent_guard(CustomToolManager)' /app/api/services/workflow/pipecat_engine_custom_tools.py || printf '\nfrom api.services.workflow.transfer_consent_guard import install_transfer_consent_guard\ninstall_transfer_consent_guard(CustomToolManager)\n' >> /app/api/services/workflow/pipecat_engine_custom_tools.py
         grep -q 'install_customer_action_intent_guard(CustomToolManager)' /app/api/services/workflow/pipecat_engine_custom_tools.py || printf '\nfrom api.services.workflow.customer_action_intent_guard import install_customer_action_intent_guard\ninstall_customer_action_intent_guard(CustomToolManager)\n' >> /app/api/services/workflow/pipecat_engine_custom_tools.py
         exec ./scripts/start_services_docker.sh
