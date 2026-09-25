@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import type { CallStatus, Prisma } from '@prisma/client'
+import type { CallStatus } from '@prisma/client'
 import { requestedCatalogue } from '@/lib/catalogue/detection.mjs'
 import { isTerminalCampaignLifecycle } from '@/lib/campaigns/run-recovery.mjs'
+import { transcriptMessages } from '@/lib/transcripts/parse.mjs'
 
 function toStatus(value: unknown): CallStatus {
   const normalized = String(value || '').toLowerCase().replace(/[\s-]+/g, '_')
@@ -12,41 +13,6 @@ function toStatus(value: unknown): CallStatus {
   if (normalized.includes('fail') || normalized.includes('error') || normalized.includes('cancel')) return 'FAILED'
   if (normalized.includes('ring') || normalized.includes('progress') || normalized.includes('answer')) return 'IN_PROGRESS'
   return 'COMPLETED'
-}
-
-function transcriptMessages(value: unknown): Prisma.InputJsonValue | null {
-  if (Array.isArray(value)) {
-    const normalized = value.map((item, index) => {
-      if (!item || typeof item !== 'object') return null
-      const message = item as Record<string, unknown>
-      const role = String(message.from || message.role || message.speaker || '').toLowerCase()
-      const text = String(message.text || message.content || '').trim()
-      if (!text) return null
-      return {
-        from: /user|customer|caller/.test(role) ? 'customer' : 'agent',
-        text,
-        time: typeof message.time === 'string' ? message.time : `0:${String(index * 4).padStart(2, '0')}`,
-      }
-    }).filter(Boolean)
-    return normalized.length ? normalized as Prisma.InputJsonValue : null
-  }
-  if (typeof value !== 'string' || !value.trim()) return null
-
-  const lines = value.split('\n').map(line => line.trim()).filter(Boolean)
-  const firstTimestamp = lines.map(line => line.match(/^\[([^\]]+)\]/)?.[1])
-    .map(value => value ? new Date(value).getTime() : Number.NaN)
-    .find(value => Number.isFinite(value))
-  return lines.map((line, index) => {
-    const match = line.match(/^(?:\[([^\]]+)\]\s*)?(assistant|agent|bot|customer|user|caller):\s*(.*)$/i)
-    const timestamp = match?.[1] ? new Date(match[1]).getTime() : Number.NaN
-    const elapsed = Number.isFinite(timestamp) && firstTimestamp ? Math.max(0, Math.round((timestamp - firstTimestamp) / 1000)) : index * 4
-    const role = match?.[2] || 'assistant'
-    return {
-      from: /customer|user|caller/i.test(role) ? 'customer' : 'agent',
-      text: (match?.[3] || line).trim(),
-      time: `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`,
-    }
-  }) as Prisma.InputJsonValue
 }
 
 async function loadTranscript(raw: unknown, transcriptUrl: string | null) {

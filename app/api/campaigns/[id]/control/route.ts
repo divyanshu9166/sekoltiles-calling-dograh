@@ -25,6 +25,40 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
       return NextResponse.json({ success: true, campaign: updated })
     }
 
+    if (action === 'retry_failed') {
+      if (campaign.status !== 'COMPLETED') {
+        return NextResponse.json({ success: false, error: 'Finish the campaign before calling failed contacts again.' }, { status: 400 })
+      }
+      const failedCount = await prisma.campaignLead.count({ where: { campaignId: id, status: 'FAILED' } })
+      if (!failedCount) {
+        return NextResponse.json({ success: false, error: 'This campaign has no failed contacts.' }, { status: 400 })
+      }
+
+      const now = new Date()
+      const result = await prisma.$transaction(async tx => {
+        const reopened = await tx.marketingCampaign.updateMany({
+          where: { id, status: 'COMPLETED' },
+          data: { status: 'RUNNING', startedAt: now, completedAt: null, nextCallAt: now },
+        })
+        if (!reopened.count) return null
+
+        const retried = await tx.campaignLead.updateMany({
+          where: { campaignId: id, status: 'FAILED' },
+          data: {
+            status: 'PENDING', startedAt: null, completedAt: null,
+            outcome: null, lastError: null, callLogId: null, dograhRunId: null,
+          },
+        })
+        if (!retried.count) throw new Error('Failed contacts changed before retry.')
+        const updated = await tx.marketingCampaign.findUnique({ where: { id } })
+        return { campaign: updated, retried: retried.count }
+      })
+      if (!result) {
+        return NextResponse.json({ success: false, error: 'Campaign has already been restarted.' }, { status: 409 })
+      }
+      return NextResponse.json({ success: true, ...result })
+    }
+
     if (action === 'start' || action === 'resume') {
       if (!campaign._count.leads) {
         return NextResponse.json({ success: false, error: 'This campaign has no pending contacts.' }, { status: 400 })

@@ -487,7 +487,11 @@ export default function CallsPage() {
       if (!response.ok) throw new Error(result.error || 'Campaign action failed.');
       await refreshCampaigns();
       await loadCampaignDetail(campaignDetail.id);
-      setCampaignMessage(action === 'pause' ? 'Campaign paused. The active call can finish; no new call will start.' : 'Campaign started. Contacts will be called one at a time.');
+      setCampaignMessage(action === 'pause'
+        ? 'Campaign paused. The active call can finish; no new call will start.'
+        : action === 'retry_failed'
+          ? `${result.retried} failed contact${result.retried === 1 ? '' : 's'} queued to call again, one at a time.`
+          : 'Campaign started. Contacts will be called one at a time.');
     } catch (error) {
       setCampaignError(error.message || 'Campaign action failed.');
     } finally {
@@ -1215,7 +1219,7 @@ export default function CallsPage() {
                   {transcript.messages.map((msg, idx) => (
                     <div
                       key={idx}
-                      className={`flex ${msg.from === 'agent' ? 'justify-start' : 'justify-end'}`}
+                      className={`flex ${msg.from === 'agent' ? 'justify-start' : msg.from === 'customer' ? 'justify-end' : 'justify-center'}`}
                     >
                       <div
                         className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${msg.from === 'agent'
@@ -1225,7 +1229,7 @@ export default function CallsPage() {
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
-                            {msg.from === 'agent' ? 'AI Agent' : 'Customer'}
+                            {msg.from === 'agent' ? 'AI Agent' : msg.from === 'customer' ? 'Customer' : 'Unknown speaker'}
                           </span>
                           <span className="text-[10px] text-muted">{msg.time}</span>
                         </div>
@@ -1863,6 +1867,10 @@ export default function CallsPage() {
                     ) : campaignDetail.status !== 'COMPLETED' ? (
                       <button type="button" onClick={() => handleCampaignControl(campaignDetail.status === 'PAUSED' ? 'resume' : 'start')} disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
                         <Play className="w-4 h-4" />{campaignDetail.status === 'PAUSED' ? 'Resume' : 'Start campaign'}
+                      </button>
+                    ) : (leadCounts.FAILED || 0) > 0 ? (
+                      <button type="button" onClick={() => handleCampaignControl('retry_failed')} disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                        <RefreshCw className="w-4 h-4" />Call failed again ({leadCounts.FAILED})
                       </button>
                     ) : null}
                   </div>
@@ -2707,14 +2715,14 @@ export default function CallsPage() {
                 )}
                 <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
                   {(selectedCall.transcript.messages || []).map((msg, idx) => (
-                    <div key={idx} className={`flex ${msg.from === 'agent' ? 'justify-start' : 'justify-end'}`}>
+                    <div key={idx} className={`flex ${msg.from === 'agent' ? 'justify-start' : msg.from === 'customer' ? 'justify-end' : 'justify-center'}`}>
                       <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${msg.from === 'agent'
                         ? 'bg-accent/10 border border-accent/20'
                         : 'bg-surface border border-border'
                         }`}>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
-                            {msg.from === 'agent' ? 'Anushka (AI)' : 'Customer'}
+                            {msg.from === 'agent' ? 'Anushka (AI)' : msg.from === 'customer' ? 'Customer' : 'Unknown speaker'}
                           </span>
                           <span className="text-[10px] text-muted">{msg.time}</span>
                         </div>
