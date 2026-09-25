@@ -148,7 +148,7 @@ export default function CallsPage() {
   const [campaignEdit, setCampaignEdit] = useState({ name: '', instructions: '', interCallDelaySec: 15 });
 
   const refreshLogs = () => {
-    getCallLogs().then(res => {
+    return getCallLogs().then(res => {
       if (res.success) setCallLogs(res.data);
     });
   };
@@ -547,7 +547,9 @@ export default function CallsPage() {
   const deleteSelectedRecords = async (section, label, explicitIds = null) => {
     const ids = explicitIds || selectedFor(section);
     if (!ids.length || deletingRecords) return;
-    if (!window.confirm(`Delete ${ids.length} selected ${label}${ids.length === 1 ? '' : 's'}?`)) return;
+    const activeLogSelected = section === 'logs' && callLogs.some((call) => ids.includes(call.id) && ['Queued', 'In progress'].includes(call.status));
+    const activeNote = activeLogSelected ? '\nActive calls will continue; only their dashboard logs will be hidden.' : '';
+    if (!window.confirm(`Delete ${ids.length} selected ${label}${ids.length === 1 ? '' : 's'}?${activeNote}`)) return;
 
     const actions = {
       logs: deleteCallLogs,
@@ -561,12 +563,13 @@ export default function CallsPage() {
     try {
       const result = await actions[section](ids);
       if (!result.success) throw new Error(result.error || `Could not delete ${label}s.`);
-      setSelectedRecordIds((current) => ({ ...current, [section]: [] }));
+      setSelectedRecordIds((current) => ({ ...current, [section]: (current[section] || []).filter((id) => !ids.includes(id)) }));
       setDeleteMessage(result.message || 'Selected records deleted.');
       if (section === 'logs' || section === 'transcripts') {
         setSelectedCall(null);
         setExpandedTranscript(null);
-        refreshLogs();
+        if (section === 'logs') setCallLogs((current) => current.filter((call) => !ids.includes(call.id)));
+        await refreshLogs();
       }
       if (section === 'phonebook') {
         setSelectedContact(null);

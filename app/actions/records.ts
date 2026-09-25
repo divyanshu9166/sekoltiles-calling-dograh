@@ -80,10 +80,10 @@ export async function deleteCallLogs(ids: unknown) {
     where: {
       id: { in: selected },
       deletedAt: null,
-      status: { notIn: ['QUEUED', 'IN_PROGRESS'] },
     },
     data: { deletedAt: new Date() },
   })
+  if (!result.count) return { success: false, error: 'These call logs are already deleted or no longer available.' }
   return done(result.count, 'call log')
 }
 
