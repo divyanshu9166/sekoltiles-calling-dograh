@@ -10,7 +10,7 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
   if (!Number.isInteger(id) || id <= 0) return NextResponse.json({ success: false, error: 'Invalid campaign.' }, { status: 400 })
 
   try {
-    const { action } = await request.json()
+    const { action, leadId } = await request.json()
     const campaign = await prisma.marketingCampaign.findUnique({
       where: { id },
       include: { _count: { select: { leads: { where: { status: 'PENDING' } } } } },
@@ -25,13 +25,18 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
       return NextResponse.json({ success: true, campaign: updated })
     }
 
-    if (action === 'retry_failed') {
+    if (action === 'retry_failed' || action === 'retry_failed_one') {
+      const singleLead = action === 'retry_failed_one'
+      if (singleLead && (!Number.isInteger(leadId) || leadId <= 0)) {
+        return NextResponse.json({ success: false, error: 'Invalid contact.' }, { status: 400 })
+      }
       if (campaign.status !== 'COMPLETED') {
         return NextResponse.json({ success: false, error: 'Finish the campaign before calling failed contacts again.' }, { status: 400 })
       }
-      const failedCount = await prisma.campaignLead.count({ where: { campaignId: id, status: 'FAILED' } })
+      const failedLeadWhere = { campaignId: id, status: 'FAILED' as const, ...(singleLead ? { id: leadId as number } : {}) }
+      const failedCount = await prisma.campaignLead.count({ where: failedLeadWhere })
       if (!failedCount) {
-        return NextResponse.json({ success: false, error: 'This campaign has no failed contacts.' }, { status: 400 })
+        return NextResponse.json({ success: false, error: singleLead ? 'This contact is no longer failed.' : 'This campaign has no failed contacts.' }, { status: 400 })
       }
 
       const now = new Date()
@@ -43,7 +48,7 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
         if (!reopened.count) return null
 
         const retried = await tx.campaignLead.updateMany({
-          where: { campaignId: id, status: 'FAILED' },
+          where: failedLeadWhere,
           data: {
             status: 'PENDING', startedAt: null, completedAt: null,
             outcome: null, lastError: null, callLogId: null, dograhRunId: null,

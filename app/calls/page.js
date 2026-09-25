@@ -472,7 +472,7 @@ export default function CallsPage() {
     }
   }
 
-  async function handleCampaignControl(action) {
+  async function handleCampaignControl(action, leadId) {
     if (!campaignDetail) return;
     setCampaignLoading(true);
     setCampaignError('');
@@ -481,7 +481,7 @@ export default function CallsPage() {
       const response = await fetch(`/api/campaigns/${campaignDetail.id}/control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...(leadId ? { leadId } : {}) }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Campaign action failed.');
@@ -491,6 +491,8 @@ export default function CallsPage() {
         ? 'Campaign paused. The active call can finish; no new call will start.'
         : action === 'retry_failed'
           ? `${result.retried} failed contact${result.retried === 1 ? '' : 's'} queued to call again, one at a time.`
+          : action === 'retry_failed_one'
+            ? 'Selected contact queued to call again.'
           : 'Campaign started. Contacts will be called one at a time.');
     } catch (error) {
       setCampaignError(error.message || 'Campaign action failed.');
@@ -1895,11 +1897,11 @@ export default function CallsPage() {
 
                 <div className="overflow-x-auto rounded-xl border border-border">
                   <table className="w-full min-w-[650px] text-sm">
-                    <thead className="bg-surface"><tr className="text-left text-xs text-muted"><th className="px-3 py-2.5 font-medium">Name</th><th className="px-3 py-2.5 font-medium">Contact number</th><th className="px-3 py-2.5 font-medium">Region / Zone</th><th className="px-3 py-2.5 font-medium">Status</th><th className="px-3 py-2.5 font-medium">Outcome</th></tr></thead>
+                    <thead className="bg-surface"><tr className="text-left text-xs text-muted"><th className="px-3 py-2.5 font-medium">Name</th><th className="px-3 py-2.5 font-medium">Contact number</th><th className="px-3 py-2.5 font-medium">Region / Zone</th><th className="px-3 py-2.5 font-medium">Status</th><th className="px-3 py-2.5 font-medium">Outcome</th><th className="px-3 py-2.5 font-medium">Action</th></tr></thead>
                     <tbody className="divide-y divide-border">
                       {campaignDetail.leads.map((lead) => (
                         <tr key={lead.id} className="text-foreground">
-                          <td className="px-3 py-2.5 font-medium">{lead.name}</td><td className="px-3 py-2.5 text-muted">{lead.phone}</td><td className="px-3 py-2.5 text-muted">{lead.region || 'Agent will ask'}</td><td className="px-3 py-2.5"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(lead.status)}`}>{lead.status}</span></td><td className="px-3 py-2.5 text-xs text-muted max-w-[220px] truncate" title={lead.lastError || lead.outcome || ''}>{lead.outcome || lead.lastError || '—'}</td>
+                          <td className="px-3 py-2.5 font-medium">{lead.name}</td><td className="px-3 py-2.5 text-muted">{lead.phone}</td><td className="px-3 py-2.5 text-muted">{lead.region || 'Agent will ask'}</td><td className="px-3 py-2.5"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(lead.status)}`}>{lead.status}</span></td><td className="px-3 py-2.5 text-xs text-muted max-w-[220px] truncate" title={lead.lastError || lead.outcome || ''}>{lead.outcome || lead.lastError || '—'}</td><td className="px-3 py-2.5">{lead.status === 'FAILED' && campaignDetail.status === 'COMPLETED' && <button type="button" onClick={() => handleCampaignControl('retry_failed_one', lead.id)} disabled={campaignLoading} className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-accent/25 bg-accent/10 px-2.5 py-1.5 text-xs font-medium text-accent disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" />Call again</button>}</td>
                         </tr>
                       ))}
                     </tbody>
