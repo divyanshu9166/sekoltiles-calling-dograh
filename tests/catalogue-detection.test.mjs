@@ -12,6 +12,7 @@ test('records an explicit catalogue request from a customer transcript', () => {
 test('does not treat a catalogue refusal or unrelated yes as a request', () => {
   assert.equal(requestedCatalogue([{ from: 'customer', text: 'मुझे कैटलॉग नहीं चाहिए।' }]), false)
   assert.equal(requestedCatalogue([{ from: 'customer', text: 'हाँ, appointment book कर दीजिए।' }]), false)
+  assert.equal(requestedCatalogue([{ from: 'customer', text: 'हाँ।' }]), false)
 })
 
 test('records a send confirmation after a catalogue delivery question', () => {
@@ -32,14 +33,22 @@ test('records a one-word catalogue choice after the agent asks catalogue or appo
   ]), true)
 })
 
-test('does not infer a catalogue request from an ambiguous or unrelated reply', () => {
+test('accepts yes after a catalogue offer but not after an unrelated question', () => {
   assert.equal(requestedCatalogue([
     { from: 'agent', text: 'क्या आप कैटलॉग चाहते हैं या शोरूम अपॉइंटमेंट बुक करना चाहेंगे?' },
     { from: 'customer', text: 'हाँ।' },
-  ]), false)
+  ]), true)
+  assert.equal(requestedCatalogue([
+    { from: 'agent', text: 'क्या आप कैटलॉग चाहते हैं या शोरूम अपॉइंटमेंट बुक करना चाहेंगे?' },
+    { from: 'customer', text: 'जी हाँ।' },
+  ]), true)
   assert.equal(requestedCatalogue([
     { from: 'agent', text: 'आपको कौन सा साइज़ चाहिए?' },
     { from: 'customer', text: 'Catalog.' },
+  ]), false)
+  assert.equal(requestedCatalogue([
+    { from: 'agent', text: 'क्या आप शोरूम अपॉइंटमेंट बुक करना चाहेंगे?' },
+    { from: 'customer', text: 'हाँ।' },
   ]), false)
 })
 
