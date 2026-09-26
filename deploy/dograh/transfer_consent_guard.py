@@ -21,7 +21,7 @@ _NEGATIVE_PATTERNS = (
     r"\b(?:rehne|rehney|rahne|rene)(?:\s+(?:do|to))?\b",
     r"\b(?:chhodo|chodo)(?:\s+do)?\b",
     r"\b(?:dont|do\s+not)\b",
-    r"(?:नहीं|नही|नहिं|ना|मत|(?:रहने|रेहने|रैने)(?:\s*(?:दो|तो))?|छोड़\s*दो|छोड\s*दो)",
+    r"(?:नहीं|नही|नहिं|(?:^|\s)ना(?:\s|$)|मत|(?:रहने|रेहने|रैने)(?:\s*(?:दो|तो))?|छोड़\s*दो|छोड\s*दो)",
     r"(?:ज़रूरत|जरूरत|आवश्यकता)\s*(?:नहीं|नही)",
 )
 
@@ -34,6 +34,17 @@ _DIRECT_HUMAN_REQUEST = re.compile(
     r"कनेक्ट|ट्रांसफर|बात|जोड़|जोड़|मिलवा)"
     r".{0,36}(?:human|agent|representative|customer\s*care|team|"
     r"ह्यूमन|एजेंट|कस्टमर\s*केयर|इंसान|व्यक्ति|टीम)",
+    re.IGNORECASE,
+)
+
+# Split the caller's human request from an explicit refusal to speak to AI.
+# “इंसान से बात कराओ, एआई से मत बात कराओ” is affirmative for a human,
+# whereas “इंसान से बात मत कराओ” must still be denied.
+_AI_MENTION = re.compile(r"(?:\bai\b|\bbot\b|एआई|ऐआई|बॉट|रोबोट)", re.IGNORECASE)
+_AI_REFUSAL = re.compile(
+    r"(?:\bai\b|\bbot\b|एआई|ऐआई|बॉट|रोबोट).{0,18}"
+    r"(?:मत|नहीं|नही|mat|nahi|nahin|not|dont).{0,20}"
+    r"(?:बात|बोल|baat|bol|talk|speak|connect|कनेक्ट)(?:\s+(?:कराओ|करो|करना|karao|karo))?",
     re.IGNORECASE,
 )
 
@@ -103,10 +114,13 @@ def transfer_consent_decision(messages: list[Any]) -> tuple[str, str]:
 
     if not normalized_user:
         return "clarify", latest_user
+    for part in _AI_MENTION.split(_AI_REFUSAL.sub(" ", normalized_user)):
+        if _DIRECT_HUMAN_REQUEST.search(part) and not any(
+            re.search(pattern, part, re.IGNORECASE) for pattern in _NEGATIVE_PATTERNS
+        ):
+            return "allow", latest_user
     if any(re.search(pattern, normalized_user, re.IGNORECASE) for pattern in _NEGATIVE_PATTERNS):
         return "deny", latest_user
-    if _DIRECT_HUMAN_REQUEST.search(normalized_user):
-        return "allow", latest_user
     if _UNANSWERED_HANDOFF.search(latest_assistant):
         return "allow", latest_user
     if _TRANSFER_OFFER.search(latest_assistant) and _AFFIRMATIVE.fullmatch(normalized_user):
@@ -131,6 +145,8 @@ def reinforce_transfer_decline_context(context: Any) -> bool:
     latest_user = _latest_text(messages, "user")
     normalized_user = _normalize(latest_user)
     if not _TRANSFER_OFFER.search(latest_assistant):
+        return False
+    if transfer_consent_decision(messages)[0] != "deny":
         return False
     if not any(
         re.search(pattern, normalized_user, re.IGNORECASE)
@@ -240,6 +256,18 @@ if __name__ == "__main__":
     assert transfer_consent_decision(
         [{"role": "user", "content": "human agent se baat karwa do"}]
     )[0] == "allow"
+    assert transfer_consent_decision([
+        {"role": "user", "content": "अरे कोई इंसान से बात कराओ एआई से मत बात कराओ"}
+    ])[0] == "allow"
+    assert transfer_consent_decision([
+        {"role": "user", "content": "AI se mat baat karao, human agent se connect karo"}
+    ])[0] == "allow"
+    assert transfer_consent_decision([
+        {"role": "user", "content": "इंसान से बात मत कराओ"}
+    ])[0] == "deny"
+    assert transfer_consent_decision([
+        {"role": "user", "content": "human agent se connect mat karo"}
+    ])[0] == "deny"
     assert transfer_consent_decision([
         {"role": "assistant", "content": "मुझे इस जानकारी की पुष्टि हमारी टीम से करानी होगी।"},
         {"role": "user", "content": "GST plus hai?"},

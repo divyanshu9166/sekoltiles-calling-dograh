@@ -137,7 +137,7 @@ const customerActionUuid = await upsertTool({
 
 const endCallUuid = await upsertTool({
   name: 'end_call',
-  description: 'End the telephone call immediately when the purpose is complete, the customer declines, asks to disconnect, or says goodbye. Do not keep talking after using it.',
+  description: 'End the telephone call when the purpose is complete, the customer declines the call or human transfer, asks to disconnect, or says goodbye. A request for a human while refusing to talk to AI is NOT a declined call: transfer instead. This tool speaks the goodbye; do not say it first.',
   category: 'end_call',
   icon: 'phone-off',
   icon_color: '#DC2626',
@@ -176,7 +176,7 @@ if (ariTrunkEndpoint && !/^[A-Za-z0-9_.-]+$/.test(ariTrunkEndpoint)) {
 const liveTransferUuid = isAriTelephony
   ? await upsertTool({
       name: 'transfer_to_human',
-      description: 'Bridge to the configured Sekol human team member only after an explicit transfer request, or after the caller explicitly says yes/haan/connect to the agent offer. Never invoke for no/nahi, silence, “main”, unclear, mistranscribed, or unrelated replies; ask for clear yes/no first.',
+      description: 'Bridge to the Sekol human team when the caller explicitly asks for a person, including “इंसान से बात कराओ, एआई से मत बात कराओ”, or explicitly says yes/haan/connect to your transfer offer. Refusing AI is not refusing a human. Never invoke for no/nahi to human transfer, silence, “main”, unclear or unrelated replies; ask for clear yes/no first.',
       category: 'transfer_call',
       icon: 'phone-forwarded',
       icon_color: '#2563EB',
