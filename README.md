@@ -38,19 +38,20 @@ The command is idempotent and preserves the model and telephony settings selecte
 
 LiveKit is not part of this project. Voice orchestration is exclusively handled by the separately deployed Dograh instance.
 
-For the VPS deployment, copy both `deploy/dograh/docker-compose.override.yaml`
-and `deploy/dograh/groq_model_fallback.py` beside Dograh's generated
-`docker-compose.yaml`, validate it with `docker compose config`, and recreate the
-Dograh API service. The override gives Dograh access to the CRM through the Linux
-host gateway, applies the Groq completion limit, and keeps the model selected in
-Dograh as primary. Before any response chunk has been emitted, an HTTP 429,
-timeout, connection failure, or Groq 5xx switches that call to
-`DOGRAH_GROQ_FALLBACK_MODEL` (default `openai/gpt-oss-20b`) for its remaining
-turns. The primary model uses low reasoning with a 384-token voice-response cap; the fallback uses
-low reasoning and `DOGRAH_GROQ_FALLBACK_MAX_COMPLETION_TOKENS` (default 512) so
-appointment tool arguments are not truncated into invalid JSON. It never replays
-a partially emitted response. Provider credentials remain
-in Dograh's dashboard and must never be committed to this repository.
+For the VPS deployment, copy `deploy/dograh/docker-compose.override.yaml` and
+`deploy/dograh/groq_model_fallback.py` beside Dograh's generated
+`docker-compose.yaml`, validate with `docker compose config`, then recreate the
+Dograh API service. Select `openai/gpt-oss-120b` for the Sekol workflow in
+Dograh and put `DOGRAH_GROQ_BACKUP_API_KEY` in Dograh's own `.env`. A primary
+Groq HTTP 429, timeout, connection failure, or 5xx switches the current call
+to that key without changing the selected model or conversation context. The
+switch happens only before the first response chunk, so it never replays
+partially spoken audio. After a primary 429, new calls start on the backup key
+for `DOGRAH_GROQ_429_COOLDOWN_SECONDS` (default 60 seconds). The Groq client
+uses zero automatic SDK retries to avoid long silence. If no backup key is
+configured, the existing `DOGRAH_GROQ_FALLBACK_MODEL` same-key model fallback
+and its per-call request budget remain in place. Keep the backup key only in
+Dograh's `.env`; never commit it here.
 
 ## VPS sizing
 
