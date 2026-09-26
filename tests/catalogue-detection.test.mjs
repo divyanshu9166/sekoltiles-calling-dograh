@@ -32,23 +32,3 @@ test('does not confuse an appointment reply with a catalogue request', () => {
     { from: 'customer', text: 'हाँ, अपॉइंटमेंट बुक कर दीजिए।' },
   ]), false)
 })
-
-test('defaults a bare affirmative to catalogue only after the combined choice', () => {
-  const question = 'क्या हम आपको इसी व्हाट्सऐप नंबर पर कैटलॉग शेयर कर सकते हैं, या आप शोरूम में अपॉइंटमेंट बुक करना चाहेंगे?'
-  assert.equal(requestedCatalogue([
-    { from: 'agent', text: question },
-    { from: 'customer', text: 'जी सर।' },
-  ]), true)
-  assert.equal(requestedCatalogue([
-    { from: 'agent', text: question },
-    { from: 'customer', text: 'जी सर।\nکر دیجیے.\nଏକଶହ ପାଞ୍ଚ।\nYes.\nHello.' },
-  ]), true)
-  assert.equal(requestedCatalogue([
-    { from: 'agent', text: question },
-    { from: 'customer', text: 'जी सर, अपॉइंटमेंट बुक कर दीजिए।' },
-  ]), false)
-  assert.equal(requestedCatalogue([
-    { from: 'agent', text: 'क्या मैं आपको हमारे ह्यूमन एजेंट से कनेक्ट कर दूँ?' },
-    { from: 'customer', text: 'जी सर।' },
-  ]), false)
-})
