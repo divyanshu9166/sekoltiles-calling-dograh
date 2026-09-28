@@ -52,6 +52,20 @@ test('accepts yes after a catalogue offer but not after an unrelated question', 
   ]), false)
 })
 
+test('accepts short catalogue consent in Hindi, Hinglish, and English', () => {
+  const offer = { from: 'agent', text: 'क्या हम आपको इसी व्हाट्सऐप नंबर पर कैटलॉग शेयर कर सकते हैं, या आप शोरूम अपॉइंटमेंट बुक करना चाहेंगे?' }
+  for (const reply of ['हाँ।', 'भेज दो।', 'बिल्कुल।', 'ठीक है।', 'बिल्कुल। बिल्कुल दीजिए। ठीक है।', 'ji haan', 'bilkul', 'thik hai', 'okay', 'कर दीजिए।']) {
+    assert.equal(requestedCatalogue([offer, { from: 'customer', text: reply }]), true, reply)
+  }
+  for (const reply of ['नहीं, कैटलॉग मत भेजिए।', 'अपॉइंटमेंट बुक कर दीजिए।', 'कीमत ठीक है लेकिन अपॉइंटमेंट चाहिए।', 'बारह अठारह चाहिए।']) {
+    assert.equal(requestedCatalogue([offer, { from: 'customer', text: reply }]), false, reply)
+  }
+  assert.equal(requestedCatalogue([
+    { from: 'agent', text: 'क्या आप शोरूम में अपॉइंटमेंट बुक करना चाहेंगे?' },
+    { from: 'customer', text: 'बिल्कुल।' },
+  ]), false)
+})
+
 test('does not confuse an appointment reply with a catalogue request', () => {
   assert.equal(requestedCatalogue([
     { from: 'agent', text: 'क्या आप शोरूम में अपॉइंटमेंट बुक करना चाहेंगे?' },
