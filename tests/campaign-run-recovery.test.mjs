@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { isStaleCampaignRun, isTerminalCampaignLifecycle, campaignRecoveryTimeoutMs, hasConnectedCampaignMedia } from '../lib/campaigns/run-recovery.mjs'
+import { isStaleCampaignRun, isTerminalCampaignLifecycle, campaignRecoveryTimeoutMs, isCampaignCapacityError, reconcileAriCampaignRun } from '../lib/campaigns/run-recovery.mjs'
 
 test('terminal campaign lifecycle ignores active telephony updates but accepts hangups', () => {
   for (const status of ['ringing', 'in_progress', 'answered', 'queued', '']) {
@@ -27,8 +27,31 @@ test('unanswered campaign recovery expires at 40 seconds and validates its setti
   assert.equal(campaignRecoveryTimeoutMs('invalid'), 40_000)
 })
 
-test('connected media keeps its conversation grace unless a terminal event is present', () => {
-  assert.equal(hasConnectedCampaignMedia({ gathered_context: { channel_name: 'PJSIP/vobiz-1' } }), false)
-  assert.equal(hasConnectedCampaignMedia({ gathered_context: { ext_channel_id: 'media-1' } }), true)
-  assert.equal(hasConnectedCampaignMedia({ gathered_context: { bridge_id: 'bridge-1', call_status: 'user_hangup' } }), false)
+test('only an explicit Dograh capacity rejection is safe to retry without another dial', () => {
+  assert.equal(isCampaignCapacityError({ status: 429, detail: 'Concurrent call limit reached' }), true)
+  for (const error of [new Error('timeout'), { status: 500 }, { status: 429, detail: 'Token limit' }]) {
+    assert.equal(isCampaignCapacityError(error), false)
+  }
+})
+
+test('recovery requires provider confirmation and persisted completion before advancing', async () => {
+  for (const status of ['active', 'awaiting_finalization', 'not_ready', undefined]) {
+    let calls = 0
+    const result = await reconcileAriCampaignRun(async () => { calls++; return { status } }, 42, '/runs/42')
+    assert.equal(result, null)
+    assert.equal(calls, 1)
+  }
+  const requests = []
+  const completed = { is_completed: true }
+  const result = await reconcileAriCampaignRun(async (path, init) => {
+    requests.push([path, init?.method])
+    return init?.method === 'POST' ? { status: 'recovered' } : completed
+  }, 42, '/runs/42')
+  assert.equal(result, completed)
+  assert.deepEqual(requests, [['/public/agent/runs/42/reconcile', 'POST'], ['/runs/42', undefined]])
+  assert.equal(await reconcileAriCampaignRun(async (_, init) => init ? { status: 'recovered' } : { is_completed: false }, 42, '/runs/42'), null)
+})
+
+test('recovery failure cannot release the sequential queue', async () => {
+  await assert.rejects(reconcileAriCampaignRun(async () => { throw new Error('ARI unavailable') }, 42, '/runs/42'), /ARI unavailable/)
 })

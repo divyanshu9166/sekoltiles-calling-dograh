@@ -15,6 +15,8 @@ services:
       DOGRAH_GROQ_BACKUP_API_KEY: ${DOGRAH_GROQ_BACKUP_API_KEY:-}
       DOGRAH_GROQ_429_COOLDOWN_SECONDS: ${DOGRAH_GROQ_429_COOLDOWN_SECONDS:-60}
     volumes:
+      - ./campaign_recovery.py:/app/api/services/telephony/campaign_recovery.py:ro
+      - ./install_campaign_recovery.py:/app/install_campaign_recovery.py:ro
       - ./groq_model_fallback.py:/app/api/services/pipecat/groq_model_fallback.py:ro
       - ./sarvam_saaras_v4.py:/app/api/services/pipecat/sarvam_saaras_v4.py:ro
       - ./transfer_consent_guard.py:/app/api/services/workflow/transfer_consent_guard.py:ro
@@ -23,6 +25,7 @@ services:
       - sh
       - -c
       - |
+        python /app/install_campaign_recovery.py || exit 1
         sed -i -E 's/GroqLLMSettings\(model=model, temperature=0\.1(, max_completion_tokens=[0-9]+)?(, extra=\{[^}]+\})?\)/GroqLLMSettings(model=model, temperature=0.1, max_completion_tokens=384, extra={"reasoning_effort": "low", "parallel_tool_calls": False})/' /app/api/services/pipecat/service_factory.py
         grep -q 'groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py || sed -i '/from pipecat.services.groq.llm import GroqLLMService, GroqLLMSettings/a from api.services.pipecat.groq_model_fallback import FallbackGroqLLMService' /app/api/services/pipecat/service_factory.py
         sed -i 's/return GroqLLMService(/return FallbackGroqLLMService(/' /app/api/services/pipecat/service_factory.py

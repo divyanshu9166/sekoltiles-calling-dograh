@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
-import { isStaleCampaignRun, campaignRecoveryTimeoutMs, hasConnectedCampaignMedia } from '../lib/campaigns/run-recovery.mjs'
+import { isStaleCampaignRun, campaignRecoveryTimeoutMs, isCampaignCapacityError, reconcileAriCampaignRun } from '../lib/campaigns/run-recovery.mjs'
 
 const requiredEnvironment = ['DATABASE_URL', 'DOGRAH_API_URL', 'DOGRAH_API_KEY', 'DOGRAH_WORKFLOW_UUID']
 for (const name of requiredEnvironment) {
@@ -35,10 +35,9 @@ function dograhOutboundDialTarget(phoneNumber) {
   return `PJSIP/${phoneNumber}@${trunkEndpoint}`
 }
 const pollIntervalMs = 3000
-// Release unanswered/stuck dialing runs after 40 seconds. Keep the existing
-// grace periods for connected conversations and calls underway at worker startup.
+// After 40 seconds, reconcile with Asterisk before releasing a stuck ARI run.
+// Elapsed time alone cannot prove that a ringing/connected call has ended.
 const campaignRunTimeoutMs = campaignRecoveryTimeoutMs(process.env.CAMPAIGN_STALE_RUN_SEC)
-const connectedRunTimeoutMs = Math.max(campaignRunTimeoutMs, 120_000)
 const preRestartRunTimeoutMs = Math.max(campaignRunTimeoutMs, 10 * 60_000)
 const workerStartedAt = Date.now()
 let stopping = false
@@ -80,7 +79,12 @@ async function dograhRequest(path, init = {}) {
   const text = await response.text()
   let body
   try { body = text ? JSON.parse(text) : null } catch { body = text }
-  if (!response.ok) throw new Error(`Dograh ${response.status}: ${typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body)}`)
+  if (!response.ok) {
+    const error = new Error(`Dograh ${response.status}: ${typeof body === 'string' ? body.slice(0, 300) : JSON.stringify(body)}`)
+    error.status = response.status
+    error.detail = body?.detail
+    throw error
+  }
   return body
 }
 
@@ -108,7 +112,7 @@ function runOutcome(run) {
   return String(context.mapped_call_disposition || context.call_disposition || context.call_status || 'Completed')
 }
 
-async function finishLead(lead, run) {
+async function finishLead(lead, run, recovered = false) {
   const callStatus = finalCallStatus(run)
   const leadStatus = callStatus === 'COMPLETED' ? 'COMPLETED' : 'FAILED'
   const outcome = runOutcome(run)
@@ -131,7 +135,7 @@ async function finishLead(lead, run) {
     })] : []),
     prisma.marketingCampaign.update({
       where: { id: lead.campaignId },
-      data: { nextCallAt: new Date(now.getTime() + lead.campaign.interCallDelaySec * 1000) },
+      data: { nextCallAt: recovered ? now : new Date(now.getTime() + lead.campaign.interCallDelaySec * 1000) },
     }),
   ])
   console.log(`[campaign-worker] campaign=${lead.campaignId} lead=${lead.id} finished status=${leadStatus}`)
@@ -172,13 +176,19 @@ async function reconcileActiveLead() {
     return true
   }
 
-  const run = await dograhRequest(`/workflow/${await getWorkflowId()}/runs/${encodeURIComponent(lead.dograhRunId)}`)
+  const runPath = `/workflow/${await getWorkflowId()}/runs/${encodeURIComponent(lead.dograhRunId)}`
+  const run = await dograhRequest(runPath)
   if (run.is_completed) await finishLead(lead, run)
-  else {
+  else if (run.mode === 'ari' || process.env.DOGRAH_TELEPHONY_PROVIDER?.trim().toLowerCase() === 'ari') {
+    if (isStaleCampaignRun(lead.startedAt, Date.now(), campaignRunTimeoutMs)) {
+      const closedRun = await reconcileAriCampaignRun(dograhRequest, lead.dograhRunId, runPath)
+      if (closedRun) await finishLead(lead, closedRun, true)
+    }
+  } else {
     const startedAt = lead.startedAt ? new Date(lead.startedAt).getTime() : 0
     const timeoutMs = startedAt && startedAt < workerStartedAt
       ? preRestartRunTimeoutMs
-      : hasConnectedCampaignMedia(run) ? connectedRunTimeoutMs : campaignRunTimeoutMs
+      : Math.max(120_000, campaignRunTimeoutMs)
 
     if (isStaleCampaignRun(lead.startedAt, Date.now(), timeoutMs)) {
       await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(timeoutMs / 1000)} seconds.`)
@@ -230,7 +240,10 @@ async function dialLead(lead) {
     update: { name: lead.name },
     create: { name: lead.name, phone: lead.phone },
   })
-  const callLog = await prisma.callLog.create({
+  // Reuse the queued log when capacity prevented the previous dial entirely.
+  const retryLog = lead.callLogId && !lead.dograhRunId && lead.lastError === 'Waiting for Dograh call capacity'
+    ? await prisma.callLog.findUnique({ where: { id: lead.callLogId } }) : null
+  const callLog = retryLog || await prisma.callLog.create({
     data: {
       contactId: contact.id,
       customerName: lead.name,
@@ -298,6 +311,26 @@ async function dialLead(lead) {
     ])
     console.log(`[campaign-worker] campaign=${lead.campaign.id} lead=${lead.id} dialed run=${run.workflow_run_id}`)
   } catch (error) {
+    if (isCampaignCapacityError(error)) {
+      const retryAt = new Date(Date.now() + campaignRunTimeoutMs)
+      await prisma.$transaction([
+        prisma.campaignLead.update({
+          where: { id: lead.id },
+          data: {
+            status: 'PENDING', attempts: { decrement: 1 }, callLogId: callLog.id,
+            dograhRunId: null, startedAt: null, completedAt: null,
+            outcome: null, lastError: 'Waiting for Dograh call capacity',
+          },
+        }),
+        prisma.callLog.update({
+          where: { id: callLog.id },
+          data: { status: 'QUEUED', outcome: 'Waiting for call capacity; retry scheduled' },
+        }),
+        prisma.marketingCampaign.update({ where: { id: lead.campaign.id }, data: { nextCallAt: retryAt } }),
+      ])
+      console.warn(`[campaign-worker] campaign=${lead.campaign.id} lead=${lead.id} waiting for capacity; retry scheduled`)
+      return
+    }
     const message = error instanceof Error ? error.message.slice(0, 1000) : 'Dograh could not initiate the call.'
     await prisma.$transaction([
       prisma.campaignLead.update({ where: { id: lead.id }, data: { status: 'FAILED', completedAt: new Date(), lastError: message } }),
