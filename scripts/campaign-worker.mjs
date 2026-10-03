@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
-import { isStaleCampaignRun } from '../lib/campaigns/run-recovery.mjs'
+import { isStaleCampaignRun, campaignRecoveryTimeoutMs, hasConnectedCampaignMedia } from '../lib/campaigns/run-recovery.mjs'
 
 const requiredEnvironment = ['DATABASE_URL', 'DOGRAH_API_URL', 'DOGRAH_API_KEY', 'DOGRAH_WORKFLOW_UUID']
 for (const name of requiredEnvironment) {
@@ -35,11 +35,10 @@ function dograhOutboundDialTarget(phoneNumber) {
   return `PJSIP/${phoneNumber}@${trunkEndpoint}`
 }
 const pollIntervalMs = 3000
-// Two minutes is ample for an unanswered/abandoned campaign call, while keeping
-// the queue moving if ARI never emits its final hangup event. Existing calls at
-// worker startup keep the former ten-minute grace period so a deploy/restart
-// cannot cut off a real conversation that was already underway.
-const campaignRunTimeoutMs = Math.max(120, Number(process.env.CAMPAIGN_STALE_RUN_SEC || 120)) * 1000
+// Release unanswered/stuck dialing runs after 40 seconds. Keep the existing
+// grace periods for connected conversations and calls underway at worker startup.
+const campaignRunTimeoutMs = campaignRecoveryTimeoutMs(process.env.CAMPAIGN_STALE_RUN_SEC)
+const connectedRunTimeoutMs = Math.max(campaignRunTimeoutMs, 120_000)
 const preRestartRunTimeoutMs = Math.max(campaignRunTimeoutMs, 10 * 60_000)
 const workerStartedAt = Date.now()
 let stopping = false
@@ -151,7 +150,8 @@ async function recoverStaleLead(lead, reason) {
     })] : []),
     prisma.marketingCampaign.update({
       where: { id: lead.campaignId },
-      data: { nextCallAt: new Date(now.getTime() + lead.campaign.interCallDelaySec * 1000) },
+      // The recovery timeout already supplied the wait; do not add another gap.
+      data: { nextCallAt: now },
     }),
   ])
   console.warn(`[campaign-worker] campaign=${lead.campaignId} lead=${lead.id} recovered stale run`)
@@ -166,8 +166,7 @@ async function reconcileActiveLead() {
   if (!lead) return false
 
   if (!lead.dograhRunId) {
-    const staleBefore = new Date(Date.now() - 2 * 60_000)
-    if (lead.startedAt && lead.startedAt < staleBefore) {
+    if (isStaleCampaignRun(lead.startedAt, Date.now(), campaignRunTimeoutMs)) {
       await recoverStaleLead(lead, 'Worker interrupted before Dograh accepted the call.')
     }
     return true
@@ -179,10 +178,10 @@ async function reconcileActiveLead() {
     const startedAt = lead.startedAt ? new Date(lead.startedAt).getTime() : 0
     const timeoutMs = startedAt && startedAt < workerStartedAt
       ? preRestartRunTimeoutMs
-      : campaignRunTimeoutMs
+      : hasConnectedCampaignMedia(run) ? connectedRunTimeoutMs : campaignRunTimeoutMs
 
     if (isStaleCampaignRun(lead.startedAt, Date.now(), timeoutMs)) {
-      await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(timeoutMs / 60_000)} minutes.`)
+      await recoverStaleLead(lead, `Dograh run ${lead.dograhRunId} did not close within ${Math.round(timeoutMs / 1000)} seconds.`)
     }
   }
   return true
