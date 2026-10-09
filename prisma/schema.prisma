@@ -184,6 +184,10 @@ model MarketingCampaign {
   sourceType        String
   sourceName        String?
   interCallDelaySec Int            @default(15)
+  callingStartTime String?        @db.VarChar(5)
+  callingEndTime   String?        @db.VarChar(5)
+  autoResumeDaily  Boolean        @default(false)
+  scheduleStopAt   DateTime?
   nextCallAt        DateTime?
   startedAt         DateTime?
   completedAt       DateTime?

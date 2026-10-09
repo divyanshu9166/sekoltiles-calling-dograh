@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import pg from 'pg'
+import { canStartCampaignCall } from '../lib/campaigns/schedule.mjs'
 import { isStaleCampaignRun, campaignRecoveryTimeoutMs, isCampaignCapacityError, reconcileAriCampaignRun } from '../lib/campaigns/run-recovery.mjs'
 
 const requiredEnvironment = ['DATABASE_URL', 'DOGRAH_API_URL', 'DOGRAH_API_KEY', 'DOGRAH_WORKFLOW_UUID']
@@ -215,21 +216,35 @@ async function completeEmptyCampaigns() {
 
 async function claimNextLead() {
   return prisma.$transaction(async transaction => {
-    const campaign = await transaction.marketingCampaign.findFirst({
+    const campaigns = await transaction.marketingCampaign.findMany({
       where: { status: 'RUNNING', OR: [{ nextCallAt: null }, { nextCallAt: { lte: new Date() } }] },
       orderBy: [{ startedAt: 'asc' }, { id: 'asc' }],
     })
-    if (!campaign) return null
-    const lead = await transaction.campaignLead.findFirst({
-      where: { campaignId: campaign.id, status: 'PENDING' },
-      orderBy: { id: 'asc' },
-    })
-    if (!lead) return null
-    const claimed = await transaction.campaignLead.updateMany({
-      where: { id: lead.id, status: 'PENDING' },
-      data: { status: 'CALLING', attempts: { increment: 1 }, startedAt: new Date(), lastError: null },
-    })
-    return claimed.count === 1 ? { ...lead, campaign } : null
+    for (const campaign of campaigns) {
+      if (!canStartCampaignCall(campaign)) continue
+      const lead = await transaction.campaignLead.findFirst({
+        where: { campaignId: campaign.id, status: 'PENDING' },
+        orderBy: { id: 'asc' },
+      })
+      if (!lead) continue
+      const claimed = await transaction.campaignLead.updateMany({
+        where: { id: lead.id, status: 'PENDING' },
+        data: { status: 'CALLING', attempts: { increment: 1 }, startedAt: new Date(), lastError: null },
+      })
+      return claimed.count === 1 ? { ...lead, campaign } : null
+    }
+    return null
+  })
+}
+
+async function pauseExpiredCampaigns() {
+  await prisma.marketingCampaign.updateMany({
+    where: {
+      status: 'RUNNING', autoResumeDaily: false,
+      callingStartTime: { not: null }, scheduleStopAt: { lte: new Date() },
+      leads: { none: { status: 'CALLING' } },
+    },
+    data: { status: 'PAUSED', nextCallAt: null },
   })
 }
 
@@ -241,7 +256,7 @@ async function dialLead(lead) {
     create: { name: lead.name, phone: lead.phone },
   })
   // Reuse the queued log when capacity prevented the previous dial entirely.
-  const retryLog = lead.callLogId && !lead.dograhRunId && lead.lastError === 'Waiting for Dograh call capacity'
+  const retryLog = lead.callLogId && !lead.dograhRunId && ['Waiting for Dograh call capacity', 'Waiting for campaign calling window'].includes(lead.lastError)
     ? await prisma.callLog.findUnique({ where: { id: lead.callLogId } }) : null
   const callLog = retryLog || await prisma.callLog.create({
     data: {
@@ -274,6 +289,19 @@ async function dialLead(lead) {
       .replace(/हमारे पास/g, 'हमारा')
       .replace(/उपलब्ध साइज़/g, 'साइज़')
       .slice(0, 2000)
+    // Recheck after async preparation: the window may have closed, or the user
+    // may have paused/edited the campaign since the lead was claimed.
+    const currentCampaign = await prisma.marketingCampaign.findUnique({ where: { id: lead.campaign.id } })
+    if (!canStartCampaignCall(currentCampaign)) {
+      await prisma.campaignLead.update({
+        where: { id: lead.id },
+        data: {
+          status: 'PENDING', attempts: { decrement: 1 }, callLogId: callLog.id,
+          startedAt: null, lastError: 'Waiting for campaign calling window',
+        },
+      })
+      return
+    }
     const run = await dograhRequest(`/public/agent/workflow/${encodeURIComponent(process.env.DOGRAH_WORKFLOW_UUID.trim())}`, {
       method: 'POST',
       body: JSON.stringify({
@@ -347,6 +375,7 @@ async function dialLead(lead) {
 async function tick() {
   if (await reconcileActiveLead()) return
   await completeEmptyCampaigns()
+  await pauseExpiredCampaigns()
   const lead = await claimNextLead()
   if (lead) await dialLead(lead)
 }

@@ -53,6 +53,7 @@ import {
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
 import ThemeToggle from '@/components/ThemeToggle';
+import CampaignScheduleFields, { DEFAULT_CAMPAIGN_SCHEDULE } from '@/components/CampaignScheduleFields';
 import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
 import { createAppointment, getAppointments, updateAppointmentStatus } from '@/app/actions/appointments';
 import { getCatalogueRequests } from '@/app/actions/catalogue';
@@ -136,6 +137,7 @@ export default function CallsPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState(null);
   const [campaignDetail, setCampaignDetail] = useState(null);
   const [campaignForm, setCampaignForm] = useState({
+    ...DEFAULT_CAMPAIGN_SCHEDULE,
     name: '',
     instructions: DEFAULT_CAMPAIGN_INSTRUCTIONS,
     googleSheetUrl: '',
@@ -206,6 +208,9 @@ export default function CallsPage() {
         name: result.campaign.name,
         instructions: result.campaign.instructions,
         interCallDelaySec: result.campaign.interCallDelaySec,
+        callingStartTime: result.campaign.callingStartTime ?? null,
+        callingEndTime: result.campaign.callingEndTime ?? null,
+        autoResumeDaily: result.campaign.autoResumeDaily ?? false,
       });
     }
   };
@@ -449,6 +454,9 @@ export default function CallsPage() {
       data.set('instructions', campaignForm.instructions);
       data.set('googleSheetUrl', campaignForm.googleSheetUrl);
       data.set('interCallDelaySec', String(campaignForm.interCallDelaySec));
+      data.set('callingStartTime', campaignForm.callingStartTime || '');
+      data.set('callingEndTime', campaignForm.callingEndTime || '');
+      data.set('autoResumeDaily', String(campaignForm.autoResumeDaily));
       if (campaignFile) data.set('file', campaignFile);
       const response = await fetch('/api/campaigns', { method: 'POST', body: data });
       const result = await response.json();
@@ -456,7 +464,7 @@ export default function CallsPage() {
         setCampaignError(result.error || 'Campaign could not be created.');
         return;
       }
-      setCampaignForm({ name: '', instructions: DEFAULT_CAMPAIGN_INSTRUCTIONS, googleSheetUrl: '', interCallDelaySec: 15 });
+      setCampaignForm({ ...DEFAULT_CAMPAIGN_SCHEDULE, name: '', instructions: DEFAULT_CAMPAIGN_INSTRUCTIONS, googleSheetUrl: '', interCallDelaySec: 15 });
       setCampaignFile(null);
       if (campaignFileInputRef.current) campaignFileInputRef.current.value = '';
       campaignEditDirtyRef.current = false;
@@ -493,7 +501,7 @@ export default function CallsPage() {
           ? `${result.retried} failed contact${result.retried === 1 ? '' : 's'} queued to call again, one at a time.`
           : action === 'retry_failed_one'
             ? 'Selected contact queued to call again.'
-          : 'Campaign started. Contacts will be called one at a time.');
+          : 'Campaign enabled. Contacts will be called one at a time during its configured calling hours.');
     } catch (error) {
       setCampaignError(error.message || 'Campaign action failed.');
     } finally {
@@ -518,7 +526,7 @@ export default function CallsPage() {
       campaignEditDirtyRef.current = false;
       await refreshCampaigns();
       await loadCampaignDetail(campaignDetail.id);
-      setCampaignMessage('Campaign instructions saved. Future calls will use the updated script.');
+      setCampaignMessage('Campaign settings saved. They apply to future calls; an ongoing call will finish normally.');
     } catch (error) {
       setCampaignError(error.message || 'Campaign instructions could not be saved.');
     } finally {
@@ -1719,6 +1727,8 @@ export default function CallsPage() {
     const statusClass = (status) => ({
       DRAFT: 'bg-zinc-500/10 text-muted border-zinc-500/20',
       RUNNING: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20',
+      WAITING: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
+      FINISHING_CALL: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
       PAUSED: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20',
       COMPLETED: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20',
       PENDING: 'bg-zinc-500/10 text-muted border-zinc-500/20',
@@ -1741,6 +1751,7 @@ export default function CallsPage() {
           </div>
 
           <form onSubmit={handleCampaignCreate} className="space-y-4">
+            <CampaignScheduleFields value={campaignForm} onChange={(changes) => setCampaignForm((current) => ({ ...current, ...changes }))} />
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3">
               <label className="block">
                 <span className="block text-sm font-medium text-foreground mb-1.5">Campaign name</span>
@@ -1842,7 +1853,7 @@ export default function CallsPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-foreground line-clamp-2">{campaign.name}</p>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(campaign.status)}`}>{campaign.status}</span>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass(campaign.callingSchedule?.status || campaign.status)}`}>{(campaign.callingSchedule?.status || campaign.status).replaceAll('_', ' ')}</span>
                     </div>
                     <p className="mt-2 text-xs text-muted">{done} of {total} processed</p>
                   </button>
@@ -1860,9 +1871,13 @@ export default function CallsPage() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-lg font-semibold text-foreground">{campaignDetail.name}</h3>
-                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(campaignDetail.status)}`}>{campaignDetail.status}</span>
+                      <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClass(campaignDetail.callingSchedule?.status || campaignDetail.status)}`}>{(campaignDetail.callingSchedule?.status || campaignDetail.status).replaceAll('_', ' ')}</span>
                     </div>
                     <p className="text-xs text-muted mt-1">{campaignDetail.sourceType === 'google_sheet' ? 'Google Sheet' : campaignDetail.sourceName} · one call at a time</p>
+                    {campaignDetail.callingSchedule?.enabled && <p className="text-xs text-muted mt-2">
+                      Calling hours: {campaignDetail.callingStartTime}–{campaignDetail.callingEndTime} IST · {campaignDetail.autoResumeDaily ? 'Automatic next-day resume' : 'Manual resume after closing'}
+                      {campaignDetail.callingSchedule.nextStartAt && <> · Next window: {new Date(campaignDetail.callingSchedule.nextStartAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })} IST</>}
+                    </p>}
                   </div>
                   <div className="flex items-center gap-2">
                     {campaignDetail.status === 'RUNNING' ? (
@@ -1890,12 +1905,13 @@ export default function CallsPage() {
                 </div>
 
                 <form onSubmit={handleCampaignUpdate} className="rounded-xl border border-border bg-surface p-4 space-y-3">
+                  <CampaignScheduleFields value={campaignEdit} onChange={(changes) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, ...changes })); }} />
                   <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-3">
                     <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Campaign name</span><input value={campaignEdit.name} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, name: event.target.value })); }} maxLength={120} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent" /></label>
                     <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Call gap</span><select value={campaignEdit.interCallDelaySec} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, interCallDelaySec: Number(event.target.value) })); }} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-accent"><option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={30}>30 seconds</option><option value={60}>1 minute</option></select></label>
                   </div>
                   <label className="block"><span className="block text-xs font-medium text-foreground mb-1">Agent prompt / instructions</span><textarea value={campaignEdit.instructions} onChange={(event) => { campaignEditDirtyRef.current = true; setCampaignEdit((current) => ({ ...current, instructions: event.target.value })); }} rows={5} minLength={10} maxLength={2000} required className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm leading-6 text-foreground outline-none focus:border-accent resize-y" /></label>
-                  <button type="submit" disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-sm font-medium text-accent disabled:opacity-50">Save instructions</button>
+                  <button type="submit" disabled={campaignLoading} className="inline-flex items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-sm font-medium text-accent disabled:opacity-50">Save campaign settings</button>
                 </form>
 
                 <div className="overflow-x-auto rounded-xl border border-border">

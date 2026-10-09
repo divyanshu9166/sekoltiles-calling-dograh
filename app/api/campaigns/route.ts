@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentAdmin } from '@/lib/auth'
 import { importCampaignFile, importGoogleSheet } from '@/lib/campaigns/import'
 import { prisma } from '@/lib/db'
+import { validateCampaignSchedule, campaignScheduleDisplay } from '@/lib/campaigns/schedule.mjs'
 
 export async function GET() {
   if (!await getCurrentAdmin()) return NextResponse.json({ success: false, error: 'Unauthorized.' }, { status: 401 })
@@ -19,7 +20,10 @@ export async function GET() {
 
   return NextResponse.json({
     success: true,
-    campaigns: campaigns.map(campaign => ({ ...campaign, counts: counts.get(campaign.id) || {} })),
+    campaigns: campaigns.map(campaign => ({
+      ...campaign, counts: counts.get(campaign.id) || {},
+      callingSchedule: campaignScheduleDisplay(campaign, counts.get(campaign.id)?.CALLING || 0),
+    })),
   })
 }
 
@@ -33,6 +37,15 @@ export async function POST(request: NextRequest) {
     const googleSheetUrl = String(form.get('googleSheetUrl') || '').trim()
     const file = form.get('file')
     const delayValue = Number(form.get('interCallDelaySec') || 15)
+    const autoResumeValue = form.get('autoResumeDaily')
+    if (autoResumeValue !== null && autoResumeValue !== 'true' && autoResumeValue !== 'false') {
+      return NextResponse.json({ success: false, error: 'Automatic next-day resume must be on or off.' }, { status: 400 })
+    }
+    const schedule = validateCampaignSchedule({
+      callingStartTime: form.get('callingStartTime') || null,
+      callingEndTime: form.get('callingEndTime') || null,
+      autoResumeDaily: autoResumeValue === 'true',
+    })
 
     if (name.length < 3 || name.length > 120) {
       return NextResponse.json({ success: false, error: 'Campaign name must be 3–120 characters.' }, { status: 400 })
@@ -64,6 +77,7 @@ export async function POST(request: NextRequest) {
         sourceType,
         sourceName,
         interCallDelaySec,
+        ...schedule,
         leads: { create: imported.leads },
       },
       include: { _count: { select: { leads: true } } },

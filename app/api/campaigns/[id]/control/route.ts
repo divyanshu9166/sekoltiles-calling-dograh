@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { campaignScheduleActivation } from '@/lib/campaigns/schedule.mjs'
 
 type CampaignRouteContext = { params: Promise<{ id: string }> }
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
       const result = await prisma.$transaction(async tx => {
         const reopened = await tx.marketingCampaign.updateMany({
           where: { id, status: 'COMPLETED' },
-          data: { status: 'RUNNING', startedAt: now, completedAt: null, nextCallAt: now },
+          data: { status: 'RUNNING', startedAt: now, completedAt: null, ...campaignScheduleActivation(campaign, now) },
         })
         if (!reopened.count) return null
 
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest, context: CampaignRouteContext) 
           status: 'RUNNING',
           startedAt: campaign.startedAt || new Date(),
           completedAt: null,
-          nextCallAt: new Date(),
+          ...campaignScheduleActivation(campaign),
         },
       })
       return NextResponse.json({ success: true, campaign: updated })

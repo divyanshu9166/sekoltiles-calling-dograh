@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCurrentAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import { validateCampaignSchedule, campaignScheduleActivation, campaignScheduleDisplay } from '@/lib/campaigns/schedule.mjs'
 
 type CampaignRouteContext = { params: Promise<{ id: string }> }
 
@@ -21,7 +22,10 @@ export async function GET(_request: NextRequest, context: CampaignRouteContext) 
   ])
   if (!campaign) return NextResponse.json({ success: false, error: 'Campaign not found.' }, { status: 404 })
   const counts = Object.fromEntries(groupedCounts.map(row => [row.status, row._count._all]))
-  return NextResponse.json({ success: true, campaign: { ...campaign, leads, counts, visibleLeadLimit: 250 } })
+  return NextResponse.json({ success: true, campaign: {
+    ...campaign, leads, counts, visibleLeadLimit: 250,
+    callingSchedule: campaignScheduleDisplay(campaign, counts.CALLING || 0),
+  } })
 }
 
 export async function PATCH(request: NextRequest, context: CampaignRouteContext) {
@@ -41,9 +45,26 @@ export async function PATCH(request: NextRequest, context: CampaignRouteContext)
       return NextResponse.json({ success: false, error: 'Campaign instructions must be 10–2000 characters.' }, { status: 400 })
     }
     const interCallDelaySec = Number.isFinite(delayValue) ? Math.max(5, Math.min(300, Math.round(delayValue))) : 15
+    const existing = await prisma.marketingCampaign.findUnique({ where: { id } })
+    if (!existing) return NextResponse.json({ success: false, error: 'Campaign not found.' }, { status: 404 })
+    let schedule
+    try {
+      schedule = validateCampaignSchedule({
+        callingStartTime: body.callingStartTime === undefined ? existing.callingStartTime : body.callingStartTime,
+        callingEndTime: body.callingEndTime === undefined ? existing.callingEndTime : body.callingEndTime,
+        autoResumeDaily: body.autoResumeDaily === undefined ? existing.autoResumeDaily : body.autoResumeDaily,
+      })
+    } catch (error) {
+      return NextResponse.json({ success: false, error: error instanceof Error ? error.message : 'Invalid calling schedule.' }, { status: 400 })
+    }
+    const scheduleChanged = schedule.callingStartTime !== existing.callingStartTime
+      || schedule.callingEndTime !== existing.callingEndTime || schedule.autoResumeDaily !== existing.autoResumeDaily
+    const activation = scheduleChanged
+      ? existing.status === 'RUNNING' ? campaignScheduleActivation(schedule) : { scheduleStopAt: null }
+      : {}
     const campaign = await prisma.marketingCampaign.update({
       where: { id },
-      data: { name, instructions, interCallDelaySec },
+      data: { name, instructions, interCallDelaySec, ...schedule, ...activation },
     })
     return NextResponse.json({ success: true, campaign })
   } catch (error: unknown) {
