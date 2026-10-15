@@ -10,6 +10,46 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model ServiceAlert {
+  id             Int      @id @default(autoincrement())
+  fingerprint    String   @unique
+  service        String
+  component      String
+  code           String
+  severity       String
+  status         String   @default("OPEN")
+  title          String
+  message        String
+  action         String
+  firstSeenAt    DateTime
+  lastSeenAt     DateTime
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  occurrences    Int      @default(0)
+  events         ServiceAlertEvent[]
+
+  @@index([status, lastSeenAt])
+}
+
+model ServiceAlertEvent {
+  id          Int      @id @default(autoincrement())
+  eventKey    String   @unique
+  alertId     Int
+  alert       ServiceAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  runId       String?
+  observedAt  DateTime
+  message     String
+
+  @@index([alertId, observedAt])
+}
+
+model ServiceMonitorState {
+  id          String   @id
+  heartbeatAt DateTime
+  cursor      DateTime?
+  details     Json
+}
+
 model Contact {
   id           Int           @id @default(autoincrement())
   name         String

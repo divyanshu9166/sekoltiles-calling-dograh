@@ -53,6 +53,7 @@ import {
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
 import ThemeToggle from '@/components/ThemeToggle';
+import ServiceAlerts from '@/components/ServiceAlerts';
 import CampaignScheduleFields, { DEFAULT_CAMPAIGN_SCHEDULE } from '@/components/CampaignScheduleFields';
 import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
 import { createAppointment, getAppointments, updateAppointmentStatus } from '@/app/actions/appointments';
@@ -121,6 +122,7 @@ export default function CallsPage() {
 
   // AI Caller state
   const [agentStatus, setAgentStatus] = useState(null);
+  const [serviceHealth, setServiceHealth] = useState(null);
   const [outboundPhone, setOutboundPhone] = useState('');
   const [outboundName, setOutboundName] = useState('');
   const [outboundReason, setOutboundReason] = useState('');
@@ -2180,9 +2182,9 @@ export default function CallsPage() {
           <StatCard
             icon={Bot}
             label="AI Agent"
-            value={agentStatus?.workerOnline ? 'Online' : agentStatus?.configured ? 'Worker Offline' : 'Not Configured'}
-            trend={agentStatus?.workerOnline ? 'Ready to accept calls' : agentStatus?.configured ? 'Start or restore the AI worker' : 'Setup required'}
-            positive={agentStatus?.workerOnline}
+            value={serviceHealth?.activeCount > 0 ? 'Service Alert' : agentStatus?.workerOnline ? 'Online' : agentStatus?.configured ? 'Worker Offline' : 'Not Configured'}
+            trend={serviceHealth?.activeCount > 0 ? 'Review service notifications above' : !serviceHealth?.monitorOnline ? 'Provider status unverified' : agentStatus?.workerOnline ? 'No unresolved provider failures' : agentStatus?.configured ? 'Start or restore the AI worker' : 'Setup required'}
+            positive={agentStatus?.workerOnline && serviceHealth?.monitorOnline && serviceHealth?.activeCount === 0}
           />
           <StatCard icon={PhoneOutgoing} label="AI Outbound" value={aiCalls.filter(c => c.direction === 'Outbound').length} trend="Total AI calls" positive />
           <StatCard icon={PhoneIncoming} label="AI Inbound" value={aiCalls.filter(c => c.direction === 'Inbound').length} trend="Total AI calls" positive />
@@ -2543,19 +2545,20 @@ export default function CallsPage() {
             <TrendingUp className="w-3.5 h-3.5" />
             Refresh
           </button>
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${agentStatus?.configured
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${agentStatus?.workerOnline && serviceHealth?.monitorOnline && serviceHealth?.activeCount === 0
             ? 'bg-emerald-500/10 border border-emerald-500/20'
             : 'bg-zinc-500/10 border border-zinc-500/20'
             }`}>
-            <div className={`w-2 h-2 rounded-full ${agentStatus?.configured ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'}`} />
-            <span className={`text-xs font-medium ${agentStatus?.configured ? 'text-emerald-700' : 'text-muted'}`}>
-              {agentStatus?.configured ? 'AI Agent Online' : 'AI Agent Offline'}
+            <div className={`w-2 h-2 rounded-full ${serviceHealth?.activeCount > 0 ? 'bg-amber-500' : agentStatus?.workerOnline && serviceHealth?.monitorOnline ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+            <span className="text-xs font-medium text-foreground">
+              {serviceHealth?.activeCount > 0 ? 'Service attention needed' : !agentStatus?.workerOnline ? 'Calling engine offline' : !serviceHealth?.monitorOnline ? 'Service status unverified' : 'Calling engine online'}
             </span>
           </div>
         </div>
       </div>
 
       {/* Tabs */}
+      <ServiceAlerts onStatusChange={setServiceHealth} />
       <div className="bg-surface rounded-xl border border-border p-1 w-full overflow-x-auto">
         <div className="flex items-center gap-1 min-w-max">
           {TABS.map((tab) => {
