@@ -34,11 +34,23 @@ export default function ServiceAlerts({ onStatusChange }) {
   }
   useEffect(() => {
     alive.current = true;
-    refresh();
-    const timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, 15000);
-    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    let connection;
+    const visible = () => {
+      connection?.close();
+      if (document.visibilityState !== 'visible') return;
+      connection = new EventSource('/api/service-alerts/stream');
+      connection.addEventListener('ready', refresh);
+      connection.addEventListener('changed', refresh);
+      connection.onerror = () => {
+        if (alive.current && document.visibilityState === 'visible') {
+          setError('Live alerts disconnected. Use Refresh to load saved alerts.');
+          callback.current?.({ monitorOnline: false, activeCount: null });
+        }
+      };
+    };
+    visible();
     document.addEventListener('visibilitychange', visible);
-    return () => { alive.current = false; clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
+    return () => { alive.current = false; connection?.close(); document.removeEventListener('visibilitychange', visible); };
   }, []);
 
   async function update(alert, action) {
@@ -56,14 +68,13 @@ export default function ServiceAlerts({ onStatusChange }) {
   const count = data?.activeCount || 0;
   const attention = count > 0 || error || (data && !data.monitor.online);
   const shown = (data?.alerts || []).filter(a => history ? a.status === 'RESOLVED' : a.status !== 'RESOLVED');
-  const balance = data?.monitor.details?.vobizBalance;
   return (
     <section aria-label="Service notifications" className={`rounded-2xl border ${attention ? 'border-amber-500/35 bg-amber-500/5' : 'border-border bg-surface'}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 p-4">
         <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={expanded} className="flex min-w-0 items-center gap-3 text-left">
           <span className={`relative rounded-xl p-2 ${attention ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-accent/10 text-accent'}`}><Bell className="h-5 w-5" />{count > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] font-bold text-white">{count}</span>}</span>
           <span><span className="block text-sm font-semibold text-foreground">{count ? `${count} service alert${count === 1 ? '' : 's'} need attention` : 'Service notifications'}</span>
-            <span className="block text-xs text-muted">{error ? 'Status unavailable — please refresh' : !data ? 'Checking monitoring status…' : !data.monitor.online ? 'Monitoring is delayed or offline — service status cannot be confirmed' : count ? 'Provider failures detected. Review details before further calling.' : 'Monitoring active · No unresolved failures reported'}</span></span>
+            <span className="block text-xs text-muted">{error ? 'Live updates unavailable — please refresh' : !data ? 'Loading saved alerts…' : !data.monitor.online ? 'Error reporting is not configured' : count ? 'Provider failures reported. Review details before further calling.' : 'Error alerts enabled · No background provider checks'}</span></span>
           {expanded ? <ChevronUp className="h-4 w-4 shrink-0 text-muted" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted" />}
         </button>
         <button type="button" onClick={refresh} className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs text-foreground"><RefreshCw className="h-3.5 w-3.5" />Refresh status</button>
@@ -71,16 +82,13 @@ export default function ServiceAlerts({ onStatusChange }) {
       {(count > 0 || expanded) && data && <div className="grid grid-cols-1 gap-2 px-4 pb-4 sm:grid-cols-3">
         {['sarvam', 'vobiz', 'llm'].map(service => {
           const active = data.alerts.filter(a => a.service === service && a.status !== 'RESOLVED');
-          return <div key={service} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs"><p className="font-semibold text-foreground">{labels[service]}</p><p className={active.length ? 'mt-1 text-red-600 dark:text-red-300' : 'mt-1 text-muted'}>{active.length ? active[0].title : !data.monitor.online ? 'Monitoring unavailable' : service === 'vobiz' && balance?.status === 'NOT_CONFIGURED' ? 'Balance not connected · Runtime failures monitored' : 'No unresolved failures reported'}</p></div>;
+          return <div key={service} className="rounded-xl border border-border bg-surface px-3 py-2 text-xs"><p className="font-semibold text-foreground">{labels[service]}</p><p className={active.length ? 'mt-1 text-red-600 dark:text-red-300' : 'mt-1 text-muted'}>{active.length ? active[0].title : !data.monitor.online ? 'Error reporting not configured' : 'No unresolved failures reported'}</p></div>;
         })}
       </div>}
       {error && <p role="alert" className="px-4 pb-3 text-sm text-red-600 dark:text-red-300">{error}</p>}
       {expanded && data && <div className="space-y-3 border-t border-border p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted"><div className="flex gap-2"><button type="button" onClick={() => setHistory(false)} aria-pressed={!history} className={`rounded-lg px-3 py-1.5 ${!history ? 'bg-accent/15 text-accent' : 'bg-surface'}`}>Active ({count})</button><button type="button" onClick={() => setHistory(true)} aria-pressed={history} className={`rounded-lg px-3 py-1.5 ${history ? 'bg-accent/15 text-accent' : 'bg-surface'}`}>Resolved history</button></div><span>Last monitor check: {time(data.monitor.heartbeatAt)}</span></div>
-        {data.monitor.details?.issues?.map(issue => <p key={issue} className="rounded-lg bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-200">{issue}</p>)}
-        {balance?.status === 'CHECKED' && <p className="text-xs text-muted">Vobiz available balance: {balance.available} {balance.currency} · {balance.postpaid ? 'Postpaid account' : 'Prepaid account'} · checked {time(balance.checkedAt)}</p>}
-        {balance?.status === 'NOT_CONFIGURED' && <p className="text-xs text-muted">Vobiz balance API is not connected. Runtime errors are monitored; exact remaining balance cannot be verified.</p>}
-        {balance?.status === 'FAILED' && <p className="text-xs text-red-600">Vobiz balance could not be verified: {balance.message}</p>}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted"><div className="flex gap-2"><button type="button" onClick={() => setHistory(false)} aria-pressed={!history} className={`rounded-lg px-3 py-1.5 ${!history ? 'bg-accent/15 text-accent' : 'bg-surface'}`}>Active ({count})</button><button type="button" onClick={() => setHistory(true)} aria-pressed={history} className={`rounded-lg px-3 py-1.5 ${history ? 'bg-accent/15 text-accent' : 'bg-surface'}`}>Resolved history</button></div><span>Last received error: {data.monitor.heartbeatAt ? time(data.monitor.heartbeatAt) : 'No new error received'}</span></div>
+        <p className="text-xs text-muted">Alerts are sent only when a provider reports an error. No scheduled balance checks or call-history scans run in the background.</p>
         {!shown.length && <p className="py-3 text-sm text-muted">{history ? 'No resolved alerts yet.' : 'No unresolved service alerts. This does not verify provider credit balances.'}</p>}
         {shown.map(alert => <article key={alert.id} className="rounded-xl border border-border bg-surface p-4">
           <div className="flex flex-wrap items-start justify-between gap-2"><h3 className="flex items-center gap-2 text-sm font-semibold text-foreground"><AlertTriangle className={`h-4 w-4 shrink-0 ${alert.severity === 'CRITICAL' ? 'text-red-500' : 'text-amber-500'}`} />{alert.title}</h3><span className="rounded-full bg-background px-2 py-1 text-[10px] text-muted">{alert.status.replaceAll('_', ' ')} · {alert.severity}</span></div>

@@ -1,9 +1,13 @@
-import test from 'node:test'
+import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 
-function handler({ authorized = true, monitorAge = 0, changed = false } = {}) {
+const priorSecret = process.env.SEKOL_ALERT_SECRET
+before(() => { process.env.SEKOL_ALERT_SECRET = 'test-event-secret' })
+after(() => { if (priorSecret === undefined) delete process.env.SEKOL_ALERT_SECRET; else process.env.SEKOL_ALERT_SECRET = priorSecret })
+
+function handler({ authorized = true, configured = true, changed = false } = {}) {
   const now = new Date('2026-10-15T13:02:00Z')
   const writes = []
   const alert = { id: 1, status: 'OPEN', severity: 'CRITICAL', service: 'sarvam', lastSeenAt: now, events: [{ id: 4, runId: '5463', observedAt: now }] }
@@ -12,7 +16,7 @@ function handler({ authorized = true, monitorAge = 0, changed = false } = {}) {
       findMany: async ({ where }) => where.status === 'RESOLVED' ? [] : [alert],
       updateMany: async args => { writes.push(args); return { count: changed ? 0 : 1 } },
     },
-    serviceMonitorState: { findUnique: async () => ({ heartbeatAt: new Date(Date.now() - monitorAge), details: { logCollectionOnline: true, historySyncOnline: true } }) },
+    serviceMonitorState: { findUnique: async () => ({ heartbeatAt: now, details: { mode: 'EVENT_DRIVEN', enabled: configured, lastEventAt: now.toISOString() } }) },
     callLog: { findMany: async () => [{ id: 12, dograhRunId: '5463', customerName: 'Test caller', direction: 'INBOUND' }] },
   }
   const compiled = ts.transpileModule(readFileSync(new URL('../app/api/service-alerts/route.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -21,6 +25,7 @@ function handler({ authorized = true, monitorAge = 0, changed = false } = {}) {
     if (id === 'next/server') return { NextResponse: Response }
     if (id === '@/lib/auth') return { getCurrentAdmin: async () => authorized }
     if (id === '@/lib/db') return { prisma }
+    if (id === '@/lib/service-alerts/events') return { publishServiceAlert: () => {} }
     throw new Error('Unexpected import')
   }, module.exports, module)
   return { ...module.exports, writes }
@@ -33,7 +38,7 @@ test('both notification reads and state changes require an authenticated admin',
   assert.equal((await api.PATCH(patch({ id: 1, action: 'resolve' }))).status, 401)
   assert.equal(api.writes.length, 0)
 })
-test('notification response includes failures, monitoring freshness and affected CRM call', async () => {
+test('event-driven status stays configured without heartbeat writes or provider checks', async () => {
   const response = await handler().GET()
   const data = await response.json()
   assert.equal(data.activeCount, 1)
@@ -41,8 +46,9 @@ test('notification response includes failures, monitoring freshness and affected
   assert.equal(data.monitor.online, true)
   assert.equal(data.alerts[0].events[0].call.id, 12)
   assert.match(response.headers.get('Cache-Control'), /no-store/)
-  const stale = await (await handler({ monitorAge: 60000 }).GET()).json()
-  assert.equal(stale.monitor.online, false)
+  assert.equal(data.monitor.mode, 'EVENT_DRIVEN')
+  const unconfigured = await (await handler({ configured: false }).GET()).json()
+  assert.equal(unconfigured.monitor.online, false)
 })
 test('acknowledge/resolve are guarded by the observed failure timestamp', async () => {
   const api = handler()

@@ -11,8 +11,7 @@
     "db:migrate": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "dograh:sync": "node --env-file=.env scripts/sync-dograh-workflow.mjs",
-    "campaign:worker": "node --env-file=.env scripts/campaign-worker.mjs",
-    "service:monitor": "node --env-file=.env scripts/service-monitor.mjs"
+    "campaign:worker": "node --env-file=.env scripts/campaign-worker.mjs"
   },
   "dependencies": {
     "@prisma/adapter-pg": "6.19.3",
