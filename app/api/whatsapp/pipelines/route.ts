@@ -1,14 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth-helpers'
-
-const DEFAULT_STAGES = [
-    { name: 'New Lead', color: '#3b82f6', position: 0 },
-    { name: 'Qualified', color: '#eab308', position: 1 },
-    { name: 'Proposal Sent', color: '#f97316', position: 2 },
-    { name: 'Negotiation', color: '#8b5cf6', position: 3 },
-    { name: 'Won', color: '#22c55e', position: 4 },
-]
+import { DEFAULT_STAGES } from '@/lib/whatsapp/pipeline-rules'
+import { ensureDefaultPipeline } from '@/lib/whatsapp/pipeline-leads'
 
 export async function GET() {
     try {
@@ -18,6 +12,10 @@ export async function GET() {
         }
 
         const userId = String(session.user.id)
+
+        // Seeded here (under the same lock the webhook uses for new leads)
+        // rather than by the browser, so two tabs can't create two pipelines.
+        await ensureDefaultPipeline(userId)
 
         const pipelines = await prisma.waPipeline.findMany({
             where: { user_id: userId },

@@ -7,6 +7,7 @@ import { getMetaAppSecrets } from '@/lib/whatsapp/saved-secrets'
 import { runAutomationsForTrigger, hasMatchingKeywordAutomation } from '@/lib/automations/engine'
 import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
+import { addInboundLeadToPipeline } from '@/lib/whatsapp/pipeline-leads'
 import { getAutomationQueue, getAiAgentQueue } from '@/lib/queues/jobs'
 import { normalizeCustomerPhone, sanitizeCustomerName } from '@/lib/appointments/booking'
 import {
@@ -621,6 +622,17 @@ async function processMessage(
     phone: senderPhone,
     name: contactName,
   })
+
+  // A first inquiry is a new lead: put it in the pipeline's New Lead stage.
+  // Done before the realtime publish below so the board's refresh sees it.
+  if (isFirstInboundMessage || contactOutcome.wasCreated) {
+    await addInboundLeadToPipeline({
+      userId,
+      contact: { id: contactRecord.id, name: contactName || contactRecord.name, phone: contactRecord.phone },
+      conversationId: conversation.id,
+      firstMessage: inboundText,
+    }).catch((err) => console.error('[webhook] adding lead to pipeline failed:', err))
+  }
 
   // ── Send 3-button inquiry welcome to brand-new contacts ─────────────────
   // isFirstInboundMessage is true when the contact has NEVER messaged us.

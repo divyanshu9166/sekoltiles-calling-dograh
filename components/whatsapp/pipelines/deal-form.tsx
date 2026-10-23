@@ -25,10 +25,12 @@ import {
   X,
   Trash2,
   MessageSquare,
-  DollarSign,
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { toDateInputValue } from "@/lib/whatsapp/pipeline-rules";
+
+const CURRENCY_SYMBOLS: Record<string, string> = { INR: "₹", EUR: "€", GBP: "£" };
 
 interface DealFormProps {
   open: boolean;
@@ -93,7 +95,7 @@ export function DealForm({
       setContactId(deal.contact_id ?? "");
       setStageId(deal.stage_id);
       setAssignedTo(deal.assigned_to ?? "");
-      setExpectedCloseDate(deal.expected_close_date ?? "");
+      setExpectedCloseDate(toDateInputValue(deal.expected_close_date));
       setNotes(deal.notes ?? "");
     } else {
       setTitle("");
@@ -280,8 +282,8 @@ export function DealForm({
 
               {linkedConversation && (
                 <Link
-                  href="/whatsapp-marketing?tab=inbox"
-                  className="mt-1 inline-flex items-center gap-1.5 self-start rounded-md bg-accent px-2 py-1 text-xs text-accent hover:bg-accent"
+                  href={`/whatsapp-marketing?tab=inbox&c=${linkedConversation.id}`}
+                  className="mt-1 inline-flex items-center gap-1.5 self-start rounded-md bg-accent/15 px-2 py-1 text-xs text-accent hover:bg-accent/25"
                 >
                   <MessageSquare className="h-3 w-3" />
                   Link to Conversation
@@ -293,7 +295,9 @@ export function DealForm({
               <div className="grid gap-2">
                 <Label className="text-foreground">Value</Label>
                 <div className="relative">
-                  <DollarSign className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-muted">
+                    {CURRENCY_SYMBOLS[currency] ?? currency}
+                  </span>
                   <Input
                     type="number"
                     value={value}

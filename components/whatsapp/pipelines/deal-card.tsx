@@ -20,7 +20,9 @@ function formatCurrency(value: number, currency?: string) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-US", {
+  // Close dates are stored as UTC midnight; format in UTC so the day never shifts.
+  return new Date(dateStr).toLocaleDateString("en-IN", {
+    timeZone: "UTC",
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -65,7 +67,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
           {deal.title}
         </h4>
         {deal.status === "won" && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-semibold text-success">
             <Check className="h-3 w-3" />
             Won
           </span>
@@ -102,7 +104,7 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
         <div className="mt-2 flex items-center justify-end">
           <span
             title={assigneeLabel}
-            className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent"
+            className="flex h-5 w-5 items-center justify-center rounded-full bg-accent/15 text-[10px] font-semibold text-accent"
           >
             {initials(assigneeLabel)}
           </span>

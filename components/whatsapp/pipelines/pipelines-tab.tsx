@@ -23,8 +23,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
+import { GitBranch, Plus, ChevronDown, Settings, UserPlus, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useRealtime } from "@/hooks/use-realtime";
+import { statusForStageMove } from "@/lib/whatsapp/pipeline-rules";
+
+// Fallback refresh for when the realtime socket isn't connected.
+const POLL_MS = 30_000;
 
 export function PipelinesTab() {
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -44,9 +49,15 @@ export function PipelinesTab() {
   const [dealFormOpen, setDealFormOpen] = useState(false);
   const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
   const [defaultStageId, setDefaultStageId] = useState<string>("");
+  const [importing, setImporting] = useState(false);
 
-  // Guard against double-seeding (React StrictMode double-effect in dev).
-  const seedAttempted = useRef(false);
+  // Background refreshes skip while a drag is still saving, so a stale
+  // response can't snap a moved card back to its old column.
+  const pendingMoves = useRef(0);
+  const selectedPipelineRef = useRef(selectedPipelineId);
+  useEffect(() => {
+    selectedPipelineRef.current = selectedPipelineId;
+  }, [selectedPipelineId]);
 
   async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
     const res = await fetch(input, init);
@@ -100,36 +111,13 @@ export function PipelinesTab() {
     [],
   );
 
-  const seedDefaultPipeline = useCallback(async (): Promise<Pipeline | null> => {
-    try {
-      const data = await fetchJson<{ data: Pipeline }>("/api/whatsapp/pipelines", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Sales Pipeline",
-          seed_default_stages: true,
-        }),
-      });
-      return data.data ?? null;
-    } catch (error) {
-      console.error("Failed to seed pipeline:", error);
-      return null;
-    }
-  }, []);
-
-  // Initial load + seed-if-empty
+  // Initial load. The server creates the default "Sales Pipeline" on the
+  // first request, so the list is only empty if the user deleted them all.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      let list = await loadPipelines();
-
-      if (list.length === 0 && !seedAttempted.current) {
-        seedAttempted.current = true;
-        const seeded = await seedDefaultPipeline();
-        if (seeded) list = await loadPipelines();
-      }
-
+      const list = await loadPipelines();
       if (cancelled) return;
       setPipelines(list);
       if (list.length > 0) {
@@ -144,7 +132,7 @@ export function PipelinesTab() {
     return () => {
       cancelled = true;
     };
-  }, [loadPipelines, seedDefaultPipeline]);
+  }, [loadPipelines]);
 
   // Load stages + deals whenever selected pipeline changes.
   // Clearing on no-selection is a legitimate sync with URL/prop
@@ -190,25 +178,115 @@ export function PipelinesTab() {
     setDeals(await loadDeals(selectedPipelineId));
   }, [loadDeals, selectedPipelineId]);
 
+  // Quiet refresh for new leads arriving from WhatsApp: no error toasts,
+  // and the result is dropped if the user switched pipelines meanwhile.
+  const backgroundRefresh = useCallback(async () => {
+    const pipelineId = selectedPipelineId;
+    if (!pipelineId || pendingMoves.current > 0) return;
+    try {
+      const data = await fetchJson<{ data: Deal[] }>(
+        `/api/whatsapp/pipelines/${pipelineId}/deals`,
+        { cache: "no-store" },
+      );
+      if (pendingMoves.current > 0 || selectedPipelineRef.current !== pipelineId) return;
+      setDeals(data.data ?? []);
+    } catch {
+      // The next poll or event retries.
+    }
+  }, [selectedPipelineId]);
+
+  // A new WhatsApp inquiry gets its deal before the webhook publishes the
+  // message, so refreshing on customer messages shows new leads live.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => void backgroundRefresh(), 600);
+  }, [backgroundRefresh]);
+  useEffect(
+    () => () => {
+      if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    },
+    [],
+  );
+
+  useRealtime({
+    channelName: "pipelines",
+    enabled: !!selectedPipelineId,
+    onMessageEvent: (event) => {
+      if (event.eventType === "INSERT" && event.new.sender_type === "customer") scheduleRefresh();
+    },
+    onConversationEvent: (event) => {
+      if (event.eventType === "INSERT") scheduleRefresh();
+    },
+  });
+
+  useEffect(() => {
+    if (!selectedPipelineId) return;
+    const tick = () => {
+      if (document.visibilityState === "visible") void backgroundRefresh();
+    };
+    const timer = setInterval(tick, POLL_MS);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [selectedPipelineId, backgroundRefresh]);
+
   const handleDealMoved = useCallback(
     async (dealId: string, newStageId: string) => {
-      // Optimistic update — board already animated; just persist.
+      // Optimistic update — board already animated; just persist. Moving
+      // into "Won" marks the deal won (and out of it reopens), as the
+      // server does.
+      const stage = stages.find((s) => s.id === newStageId);
       setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, stage_id: newStageId } : d)),
+        prev.map((d) => {
+          if (d.id !== dealId) return d;
+          const status = stage ? statusForStageMove(d.status, stage) : null;
+          return status
+            ? { ...d, stage_id: newStageId, status: status as Deal["status"], updated_at: new Date().toISOString() }
+            : { ...d, stage_id: newStageId };
+        }),
       );
+      pendingMoves.current += 1;
       try {
         await fetchJson(`/api/whatsapp/deals/${dealId}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ stage_id: newStageId }),
         });
+        pendingMoves.current -= 1;
       } catch {
+        pendingMoves.current -= 1;
         toast.error("Failed to move deal");
         refreshDeals();
       }
     },
-    [refreshDeals],
+    [refreshDeals, stages],
   );
+
+  async function handleImportLeads() {
+    if (!selectedPipelineId) return;
+    setImporting(true);
+    try {
+      const data = await fetchJson<{ data: { created: number } }>(
+        `/api/whatsapp/pipelines/${selectedPipelineId}/import-leads`,
+        { method: "POST" },
+      );
+      const created = data.data?.created ?? 0;
+      if (created > 0) {
+        const stageName = [...stages].sort((a, b) => a.position - b.position)[0]?.name ?? "the first stage";
+        toast.success(`Added ${created} WhatsApp lead${created === 1 ? "" : "s"} to ${stageName}`);
+        await refreshDeals();
+      } else {
+        toast.info("Every WhatsApp contact who has messaged already has a deal");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to import leads");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const handleAddDeal = useCallback(
     (stageId?: string) => {
@@ -323,7 +401,21 @@ export function PipelinesTab() {
           </DropdownMenu>
         </div>
 
-        <div className="ui-actions flex items-center gap-2">
+        <div className="ui-actions flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={handleImportLeads}
+            disabled={!selectedPipelineId || stages.length === 0 || importing}
+            title="Add every WhatsApp contact who has messaged but has no deal yet"
+            className="border-border bg-surface text-foreground hover:bg-surface-light"
+          >
+            {importing ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <UserPlus className="mr-1 h-4 w-4" />
+            )}
+            Import WhatsApp Leads
+          </Button>
           <Button
             variant="outline"
             onClick={() => setNewPipelineOpen(true)}
