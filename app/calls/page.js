@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import Link from 'next/link';
 import {
   Phone,
   PhoneIncoming,
@@ -14,7 +13,6 @@ import {
   Calendar,
   User,
   MessageSquare,
-  MessageCircle,
   Play,
   ChevronDown,
   ChevronRight,
@@ -54,7 +52,6 @@ import {
 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
-import ThemeToggle from '@/components/ThemeToggle';
 import ServiceAlerts from '@/components/ServiceAlerts';
 import CampaignScheduleFields, { DEFAULT_CAMPAIGN_SCHEDULE } from '@/components/CampaignScheduleFields';
 import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
@@ -2538,15 +2535,6 @@ export default function CallsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-          <ThemeToggle />
-          <Link
-            href="/whatsapp-marketing"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-muted hover:text-foreground transition-colors"
-            title="Open WhatsApp Marketing"
-          >
-            <MessageCircle className="w-3.5 h-3.5" />
-            WhatsApp Marketing
-          </Link>
           <button
             onClick={refreshLogs}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-muted hover:text-foreground transition-colors"

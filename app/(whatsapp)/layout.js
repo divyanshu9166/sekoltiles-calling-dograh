@@ -1,5 +1,5 @@
 import { Toaster } from 'sonner'
-import WhatsAppTopBar from './whatsapp-topbar'
+import AppTopBar from '@/components/AppTopBar'
 import './whatsapp.css'
 
 export const metadata = {
@@ -13,7 +13,7 @@ export const metadata = {
 export default function WhatsAppLayout({ children }) {
   return (
     <div className="-mx-4 -my-6 md:-mx-8">
-      <WhatsAppTopBar />
+      <AppTopBar />
       <div className="dashboard-content p-3.5 md:p-6 overflow-x-hidden">
         {children}
       </div>
