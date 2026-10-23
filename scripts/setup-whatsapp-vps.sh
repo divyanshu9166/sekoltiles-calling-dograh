@@ -17,14 +17,14 @@ add_env() {
   fi
 }
 
-echo "1/4 .env values"
+echo "1/5 .env values"
 # Encrypts saved WhatsApp tokens/secrets. Never change it once WhatsApp is configured.
 add_env ENCRYPTION_KEY "$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"
 # Own Redis on 6380 so it never clashes with Dograh's Redis.
 add_env REDIS_URL "redis://localhost:6380"
 add_env TRANSFORMERS_CACHE_DIR ".model-cache"
 
-echo "2/4 Redis 7 for automations and the AI agent (BullMQ needs Redis >= 5)"
+echo "2/5 Redis 7 for automations and the AI agent (BullMQ needs Redis >= 5)"
 if ! command -v docker >/dev/null 2>&1; then
   echo "  docker not found - install Redis >= 5 yourself and point REDIS_URL at it"
 elif docker ps --format '{{.Names}}' | grep -qx wa-redis; then
@@ -37,12 +37,15 @@ else
   echo "  wa-redis created on 127.0.0.1:6380"
 fi
 
-echo "3/4 dependencies"
+echo "3/5 dependencies"
 npm install
 npx prisma generate
 
-echo "4/4 database migrations (adds the WhatsApp tables)"
+echo "4/5 database migrations (adds the WhatsApp tables)"
 npm run db:migrate
+
+echo "5/5 AI agent knowledge base: embedding model + pgvector"
+node --env-file=.env scripts/prepare-whatsapp-embeddings.mjs
 
 echo
 echo "Done. Restart the CRM, then open WhatsApp Marketing -> Settings."
