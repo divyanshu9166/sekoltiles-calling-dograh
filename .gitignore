@@ -9,3 +9,8 @@ venv/
 __pycache__/
 *.pyc
 .DS_Store
+.model-cache/
+# WhatsApp Marketing source folders named "logs" (not runtime logs)
+!app/(whatsapp)/automations/[[]id]/logs/
+!app/api/automations/[[]id]/logs/
+!components/whatsapp/logs/

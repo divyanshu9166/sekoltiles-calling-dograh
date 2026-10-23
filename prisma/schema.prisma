@@ -260,3 +260,478 @@ model CampaignLead {
   @@index([campaignId, status, id])
   @@index([dograhRunId])
 }
+
+// ============================================================
+// WhatsApp CRM (Prisma-backed replacement for Supabase tables)
+// ============================================================
+
+model WaProfile {
+  id         String   @id @default(cuid())
+  user_id    String   @unique
+  full_name  String
+  email      String
+  avatar_url String?
+  role       String?  @default("user")
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  assigned_deals WaDeal[] @relation("WaDealAssignee")
+
+  @@map("profiles")
+}
+
+model WaContact {
+  id         String   @id @default(cuid())
+  user_id    String
+  phone      String
+  name       String?
+  email      String?
+  company    String?
+  avatar_url String?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  conversations                 WaConversation[]
+  contact_tags                  WaContactTag[]
+  contact_custom_values         WaContactCustomValue[]
+  contact_notes                 WaContactNote[]
+  deals                         WaDeal[]
+  broadcast_recipients          WaBroadcastRecipient[]
+  automation_logs               WaAutomationLog[]
+  automation_pending_executions WaAutomationPendingExecution[]
+
+  @@index([user_id])
+  @@index([phone])
+  @@map("contacts")
+}
+
+model WaTag {
+  id         String   @id @default(cuid())
+  user_id    String
+  name       String
+  color      String   @default("#3b82f6")
+  created_at DateTime @default(now())
+
+  contact_tags WaContactTag[]
+
+  @@index([user_id])
+  @@map("tags")
+}
+
+model WaContactTag {
+  id         String   @id @default(cuid())
+  contact_id String
+  tag_id     String
+  created_at DateTime @default(now())
+
+  contact WaContact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  tag     WaTag     @relation(fields: [tag_id], references: [id], onDelete: Cascade)
+
+  @@unique([contact_id, tag_id])
+  @@index([contact_id])
+  @@index([tag_id])
+  @@map("contact_tags")
+}
+
+model WaCustomField {
+  id            String   @id @default(cuid())
+  user_id       String
+  field_name    String
+  field_type    String   @default("text")
+  field_options Json?
+  created_at    DateTime @default(now())
+
+  contact_custom_values WaContactCustomValue[]
+
+  @@index([user_id])
+  @@map("custom_fields")
+}
+
+model WaContactCustomValue {
+  id              String   @id @default(cuid())
+  contact_id      String
+  custom_field_id String
+  value           String?
+  created_at      DateTime @default(now())
+
+  contact      WaContact     @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  custom_field WaCustomField @relation(fields: [custom_field_id], references: [id], onDelete: Cascade)
+
+  @@unique([contact_id, custom_field_id])
+  @@index([contact_id])
+  @@index([custom_field_id])
+  @@map("contact_custom_values")
+}
+
+model WaContactNote {
+  id         String   @id @default(cuid())
+  contact_id String
+  user_id    String
+  note_text  String
+  created_at DateTime @default(now())
+
+  contact WaContact @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+
+  @@index([contact_id])
+  @@index([user_id])
+  @@map("contact_notes")
+}
+
+model WaConversation {
+  id               String   @id @default(cuid())
+  user_id          String
+  contact_id       String
+  status           String   @default("open")
+  needs_human      Boolean  @default(false)  // set true when AI confidence is low
+  assigned_agent_id String?
+  last_message_text String?
+  last_message_at   DateTime?
+  unread_count     Int      @default(0)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  contact           WaContact          @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  messages          WaMessage[]
+  deals             WaDeal[]
+  message_reactions WaMessageReaction[]
+
+  @@unique([user_id, contact_id])
+  @@index([user_id])
+  @@index([contact_id])
+  @@index([last_message_at])
+  @@map("conversations")
+}
+
+model WaMessage {
+  id                  String   @id @default(cuid())
+  conversation_id     String
+  sender_type         String
+  sender_id           String?
+  content_type        String   @default("text")
+  content_text        String?
+  media_url           String?
+  template_name       String?
+  message_id          String?
+  status              String   @default("sent")
+  created_at          DateTime @default(now())
+  reply_to_message_id String?
+
+  conversation     WaConversation   @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  reply_to_message WaMessage?       @relation("WaMessageReplies", fields: [reply_to_message_id], references: [id], onDelete: SetNull)
+  replies          WaMessage[]      @relation("WaMessageReplies")
+  reactions        WaMessageReaction[]
+
+  @@index([conversation_id])
+  @@index([message_id])
+  @@index([reply_to_message_id])
+  @@map("messages")
+}
+
+model WaWhatsappConfig {
+  id              String   @id @default(cuid())
+  user_id         String   @unique
+  phone_number_id String
+  waba_id         String?
+  access_token    String
+  verify_token    String?
+  /// Meta App Secret (encrypted) for webhook signatures; falls back to META_APP_SECRET.
+  app_secret      String?
+  status          String   @default("disconnected")
+  connected_at    DateTime?
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@index([phone_number_id])
+  @@map("whatsapp_config")
+}
+
+model WaMessageTemplate {
+  id             String   @id @default(cuid())
+  user_id        String
+  name           String
+  category       String   @default("Marketing")
+  language       String   @default("en_US")
+  header_type    String?
+  header_content String?
+  body_text      String
+  footer_text    String?
+  buttons        Json?
+  status         String   @default("Draft")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  @@index([user_id])
+  @@index([name, language])
+  @@map("message_templates")
+}
+
+model WaPipeline {
+  id         String   @id @default(cuid())
+  user_id    String
+  name       String
+  created_at DateTime @default(now())
+
+  stages WaPipelineStage[]
+  deals  WaDeal[]
+
+  @@index([user_id])
+  @@map("pipelines")
+}
+
+model WaPipelineStage {
+  id          String   @id @default(cuid())
+  pipeline_id String
+  name        String
+  position    Int      @default(0)
+  color       String   @default("#3b82f6")
+  created_at  DateTime @default(now())
+
+  pipeline WaPipeline @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+  deals    WaDeal[]
+
+  @@index([pipeline_id])
+  @@index([position])
+  @@map("pipeline_stages")
+}
+
+model WaDeal {
+  id                  String   @id @default(cuid())
+  user_id             String
+  pipeline_id         String
+  stage_id            String
+  contact_id          String?
+  conversation_id     String?
+  assigned_to         String?
+  title               String
+  value               Float    @default(0)
+  currency            String?  @default("INR")
+  notes               String?
+  expected_close_date DateTime?
+  status              String   @default("open")
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  pipeline     WaPipeline      @relation(fields: [pipeline_id], references: [id], onDelete: Cascade)
+  stage        WaPipelineStage @relation(fields: [stage_id], references: [id])
+  contact      WaContact?      @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+  conversation WaConversation? @relation(fields: [conversation_id], references: [id], onDelete: SetNull)
+  assignee     WaProfile?      @relation("WaDealAssignee", fields: [assigned_to], references: [id], onDelete: SetNull)
+
+  @@index([pipeline_id])
+  @@index([stage_id])
+  @@index([contact_id])
+  @@index([user_id, status])
+  @@map("deals")
+}
+
+model WaBroadcast {
+  id               String   @id @default(cuid())
+  user_id          String
+  name             String
+  template_name    String
+  template_language String  @default("en_US")
+  template_variables Json?
+  audience_filter  Json?
+  scheduled_at     DateTime?
+  status           String   @default("draft")
+  total_recipients Int      @default(0)
+  sent_count       Int      @default(0)
+  delivered_count  Int      @default(0)
+  read_count       Int      @default(0)
+  replied_count    Int      @default(0)
+  failed_count     Int      @default(0)
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  recipients WaBroadcastRecipient[]
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("broadcasts")
+}
+
+model WaBroadcastRecipient {
+  id                 String   @id @default(cuid())
+  broadcast_id       String
+  contact_id         String?
+  status             String   @default("pending")
+  sent_at            DateTime?
+  delivered_at       DateTime?
+  read_at            DateTime?
+  replied_at         DateTime?
+  error_message      String?
+  whatsapp_message_id String? @unique
+  created_at         DateTime @default(now())
+
+  broadcast WaBroadcast @relation(fields: [broadcast_id], references: [id], onDelete: Cascade)
+  contact   WaContact?  @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+
+  @@index([broadcast_id])
+  @@index([broadcast_id, status])
+  @@index([contact_id])
+  @@map("broadcast_recipients")
+}
+
+model WaAutomation {
+  id               String   @id @default(cuid())
+  user_id          String
+  name             String
+  description      String?
+  trigger_type     String
+  trigger_config   Json     @default("{}")
+  is_active        Boolean  @default(false)
+  execution_count  Int      @default(0)
+  last_executed_at DateTime?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  steps              WaAutomationStep[]
+  logs               WaAutomationLog[]
+  pending_executions WaAutomationPendingExecution[]
+
+  @@index([user_id])
+  @@index([trigger_type, is_active])
+  @@map("automations")
+}
+
+model WaAutomationStep {
+  id             String   @id @default(cuid())
+  automation_id  String
+  parent_step_id String?
+  branch         String?
+  step_type      String
+  step_config    Json     @default("{}")
+  position       Int
+  created_at     DateTime @default(now())
+
+  automation  WaAutomation      @relation(fields: [automation_id], references: [id], onDelete: Cascade)
+  parent_step WaAutomationStep? @relation("WaAutomationStepHierarchy", fields: [parent_step_id], references: [id], onDelete: Cascade)
+  child_steps WaAutomationStep[] @relation("WaAutomationStepHierarchy")
+  pending_children WaAutomationPendingExecution[] @relation("WaPendingParentStep")
+
+  @@index([automation_id, position])
+  @@index([parent_step_id])
+  @@map("automation_steps")
+}
+
+model WaAutomationLog {
+  id             String   @id @default(cuid())
+  automation_id  String
+  user_id        String
+  contact_id     String?
+  trigger_event  String
+  steps_executed Json     @default("[]")
+  status         String
+  error_message  String?
+  created_at     DateTime @default(now())
+
+  automation WaAutomation @relation(fields: [automation_id], references: [id], onDelete: Cascade)
+  contact    WaContact?   @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+  pending    WaAutomationPendingExecution[]
+
+  @@index([automation_id, created_at])
+  @@index([user_id])
+  @@index([contact_id])
+  @@map("automation_logs")
+}
+
+model WaAutomationPendingExecution {
+  id                 String   @id @default(cuid())
+  automation_id      String
+  user_id            String
+  contact_id         String?
+  log_id             String?
+  parent_step_id     String?
+  branch             String?
+  next_step_position Int
+  context            Json     @default("{}")
+  status             String   @default("pending")
+  run_at             DateTime
+  created_at         DateTime @default(now())
+
+  automation   WaAutomation     @relation(fields: [automation_id], references: [id], onDelete: Cascade)
+  contact      WaContact?       @relation(fields: [contact_id], references: [id], onDelete: SetNull)
+  log          WaAutomationLog? @relation(fields: [log_id], references: [id], onDelete: Cascade)
+  parent_step  WaAutomationStep? @relation("WaPendingParentStep", fields: [parent_step_id], references: [id], onDelete: SetNull)
+
+  @@index([run_at, status])
+  @@index([user_id])
+  @@index([contact_id])
+  @@map("automation_pending_executions")
+}
+
+model WaMessageReaction {
+  id              String   @id @default(cuid())
+  message_id      String
+  conversation_id String
+  actor_type      String
+  actor_id        String?
+  emoji           String
+  created_at      DateTime @default(now())
+
+  message      WaMessage      @relation(fields: [message_id], references: [id], onDelete: Cascade)
+  conversation WaConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@unique([message_id, actor_type, actor_id])
+  @@index([conversation_id])
+  @@index([message_id])
+  @@map("message_reactions")
+}
+
+// ============================================================
+// WhatsApp AI RAG Agent
+// ============================================================
+
+model WaAgentConfig {
+  id                   String   @id @default(cuid())
+  user_id              String   @unique
+  enabled              Boolean  @default(false)
+  agent_name           String   @default("Assistant")
+  system_prompt        String   @db.Text
+  fallback_message     String   @default("Let me connect you with our team.")
+  confidence_threshold Float    @default(0.45)
+  max_response_tokens  Int      @default(300)
+  response_delay_ms    Int      @default(1500)
+  languages            String[] @default(["en", "hi"])
+  /// Gemini API key (encrypted); falls back to GEMINI_API_KEY / GOOGLE_API_KEY.
+  gemini_api_key       String?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@map("wa_agent_configs")
+}
+
+model WaKnowledgeDoc {
+  id          String   @id @default(cuid())
+  user_id     String
+  title       String
+  source_type String   @default("text")
+  raw_text    String   @db.Text
+  char_count  Int
+  status      String   @default("pending") // pending | indexed | error
+  error       String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  chunks WaKnowledgeChunk[]
+
+  @@index([user_id])
+  @@map("wa_knowledge_docs")
+}
+
+model WaKnowledgeChunk {
+  id          String   @id @default(cuid())
+  user_id     String
+  doc_id      String
+  chunk_index Int
+  content     String   @db.Text
+  // embedding vector(384) column added via raw SQL — see pgvector-migration.sql
+  created_at  DateTime @default(now())
+
+  doc WaKnowledgeDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([doc_id])
+  @@map("wa_knowledge_chunks")
+}
+
