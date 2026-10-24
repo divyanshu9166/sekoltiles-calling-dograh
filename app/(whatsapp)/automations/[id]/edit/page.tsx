@@ -53,7 +53,7 @@ export default function EditAutomationPage({
       <div className="flex h-screen flex-col items-center justify-center gap-3">
         <p className="text-sm text-red-400">{error}</p>
         <button
-          onClick={() => router.push('/automations')}
+          onClick={() => router.push('/whatsapp-marketing?tab=automations')}
           className="text-sm text-violet-400 hover:text-violet-300"
         >
           Back to Automations

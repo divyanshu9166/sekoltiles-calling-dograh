@@ -9,7 +9,8 @@ import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audien
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/lib/use-broadcast-sending';
-import { Check } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, Check } from 'lucide-react';
 
 const steps = [
   { label: 'Template', key: 'template' },
@@ -100,7 +101,7 @@ export default function NewBroadcastPage() {
       }
 
       toast.success('Draft saved');
-      router.push('/broadcasts');
+      router.push('/whatsapp-marketing?tab=broadcasts');
     } catch (err: any) {
       toast.error(`Failed to save draft: ${err.message}`);
     }
@@ -109,11 +110,23 @@ export default function NewBroadcastPage() {
   return (
     <div className="wa-light mx-auto max-w-3xl space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">New Broadcast</h1>
-        <p className="mt-1 text-sm text-muted">
-          Create and send a broadcast message to your contacts.
-        </p>
+      <div className="flex items-center gap-4">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => router.push('/whatsapp-marketing?tab=broadcasts')}
+          aria-label="Back to broadcasts"
+          title="Back to broadcasts"
+          className="shrink-0 border-border"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">New Broadcast</h1>
+          <p className="mt-1 text-sm text-muted">
+            Create and send a broadcast message to your contacts.
+          </p>
+        </div>
       </div>
 
       {/* Step Indicator */}
@@ -170,7 +183,7 @@ export default function NewBroadcastPage() {
               selectedTemplate={template}
               onSelect={setTemplate}
               onNext={() => setCurrentStep(1)}
-              onBack={() => router.push('/broadcasts')}
+              onBack={() => router.push('/whatsapp-marketing?tab=broadcasts')}
             />
           )}
           {currentStep === 1 && (

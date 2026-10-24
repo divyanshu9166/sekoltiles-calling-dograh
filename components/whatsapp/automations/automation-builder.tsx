@@ -252,7 +252,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
       <header className="ui-actions flex flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-3 sm:gap-3 sm:px-4">
         <button
           type="button"
-          onClick={() => router.push("/automations")}
+          onClick={() => router.push("/whatsapp-marketing?tab=automations")}
           className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-light hover:text-foreground"
           aria-label="Back to automations"
         >
