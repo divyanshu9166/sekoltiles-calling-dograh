@@ -72,7 +72,7 @@ export function describeInboundExtras(message: InboundExtras): string | null {
     }
 
     case 'system':
-      if (message.system?.type === 'customer_changed_number' && message.system.wa_id) {
+      if (isChangedNumberNotice(message.system?.type) && message.system?.wa_id) {
         return `ℹ️ Customer changed their number to +${message.system.wa_id}`
       }
       return `ℹ️ ${message.system?.body || 'System update'}`
@@ -89,6 +89,12 @@ export function describeInboundExtras(message: InboundExtras): string | null {
     default:
       return null
   }
+}
+
+/** Meta's notice that the customer moved to a new number (`system.wa_id`). */
+export function isChangedNumberNotice(type: string | undefined) {
+  // `customer_changed_number` is the older name for the same event.
+  return type === 'user_changed_number' || type === 'customer_changed_number'
 }
 
 /** What the customer tapped, so keyword automations and the AI agent can treat it like typed text. */

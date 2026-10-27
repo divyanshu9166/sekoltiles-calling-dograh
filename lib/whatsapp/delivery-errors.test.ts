@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describeStatusErrors, isMarketingOptOutError } from "./delivery-errors";
-import { normalizeTemplateStatus, templateStatusReason } from "./template-status";
+import { normalizeTemplateStatus, templateStatusChange, templateStatusReason } from "./template-status";
 import { parseHeaderMedia } from "./template-header";
 
 describe("describeStatusErrors", () => {
@@ -37,6 +37,16 @@ describe("template status", () => {
     expect(templateStatusReason("REJECTED", "NONE")).toBe("Rejected by Meta");
     expect(templateStatusReason("PAUSED")).toMatch(/Paused/);
     expect(templateStatusReason("APPROVED", "NONE")).toBeNull();
+  });
+
+  it("keeps reinstated and flagged templates sendable and handles lifecycle events", () => {
+    expect(templateStatusChange("REINSTATED")).toEqual({ status: "Approved", reason: null });
+    expect(templateStatusChange("FLAGGED")?.status).toBe("Approved");
+    expect(templateStatusChange("FLAGGED")?.reason).toMatch(/low quality/);
+    expect(templateStatusChange("DELETED")).toMatchObject({ status: "Draft", forgetMetaId: true });
+    expect(templateStatusChange("UNARCHIVED")?.status).toBeUndefined();
+    expect(templateStatusChange("LIMIT_EXCEEDED")).toBeNull();
+    expect(templateStatusChange("REJECTED", "INVALID_FORMAT")).toEqual({ status: "Rejected", reason: "Rejected: Invalid format" });
   });
 });
 

@@ -36,7 +36,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     setSavingOptOut(true);
     try {
       const res = await fetch(`/api/whatsapp/contacts/${contact.id}`, {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ opted_out: next }),
       });

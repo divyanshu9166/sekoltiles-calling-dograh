@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   describeInboundExtras,
   inboundReplyText,
+  isChangedNumberNotice,
   isOptInKeyword,
   isOptOutKeyword,
 } from "./inbound-message";
@@ -40,6 +41,10 @@ describe("describeInboundExtras", () => {
     expect(
       describeInboundExtras({ type: "system", system: { type: "customer_changed_number", wa_id: "919800000000", body: "x" } }),
     ).toBe("ℹ️ Customer changed their number to +919800000000");
+    expect(
+      describeInboundExtras({ type: "system", system: { type: "user_changed_number", wa_id: "919811122233", body: "x" } }),
+    ).toBe("ℹ️ Customer changed their number to +919811122233");
+    expect(isChangedNumberNotice("user_changed_user_id")).toBe(false);
     expect(describeInboundExtras({ type: "unsupported", errors: [{ code: 131051, title: "Message type unknown" }] })).toBe(
       "[Message type WhatsApp can't show here: Message type unknown]",
     );
