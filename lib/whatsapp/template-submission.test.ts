@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildTemplateCreatePayload,
+  fromMetaCategory,
+  normalizeVariables,
   parseStoredButtons,
   templateVariables,
   toMetaCategory,
@@ -88,7 +90,10 @@ describe("buildTemplateCreatePayload", () => {
   it.each([
     [{ bodyExamples: ["Ravi"] }, "Add a sample value for {{2}} in the body."],
     [{ name: "Festive Offer" }, "festive_offer"],
-    [{ body: "Hi {{1}}, {{3}} off today." }, "numbered in order"],
+    [{ body: "Hi {{1}}, {{3}} off today." }, "must appear in order"],
+    [{ body: "Hi {{2}}, order {{1}} is ready." }, "found {{2}} where {{1}} should be"],
+    [{ header: { format: "TEXT" as const, text: "Offer {{2}}", example: "a" } }, "Header variables must appear in order"],
+    [{ header: { format: "TEXT" as const, text: "   " } }, "Delete it and create it again"],
     [{ body: "Hi {{name}}, welcome." }, "Use numbered variables"],
     [{ body: "{{1}}, your tiles are ready.", bodyExamples: ["Ravi"] }, "starts or ends with a variable"],
     [{ body: "Your tiles are ready, {{1}}", bodyExamples: ["Ravi"] }, "starts or ends with a variable"],
@@ -124,7 +129,43 @@ describe("buildTemplateCreatePayload", () => {
   });
 });
 
+describe("variable order and spacing", () => {
+  it("allows a later repeat of an earlier variable", () => {
+    const payload = buildTemplateCreatePayload({
+      ...base,
+      body: "Hi {{1}}, {{2}} off for you, {{1}}, this week.",
+    });
+    expect(payload.components[0]).toMatchObject({ example: { body_text: [["Ravi", "₹2,000"]] } });
+  });
+
+  it("sends {{ 1 }} as {{1}} in the header, body and link", () => {
+    const payload = buildTemplateCreatePayload({
+      ...base,
+      header: { format: "TEXT", text: "Offer for {{ 1 }}", example: "Diwali" },
+      body: "Hi {{ 1 }}, get {{2 }} off on floor tiles.",
+      buttons: [{ type: "URL", text: "Designs", url: "https://sekol.example/d/{{ 1 }}", example: "wood" }],
+    });
+    expect(payload.components[0]).toMatchObject({ text: "Offer for {{1}}" });
+    expect(payload.components[1]).toMatchObject({ text: "Hi {{1}}, get {{2}} off on floor tiles." });
+    expect(payload.components[2]).toEqual({
+      type: "BUTTONS",
+      buttons: [{ type: "URL", text: "Designs", url: "https://sekol.example/d/{{1}}", example: ["wood"] }],
+    });
+  });
+
+  it("only rewrites numbered variables", () => {
+    expect(normalizeVariables("{{ 12 }} and {{name}} and {{  3}}")).toBe("{{12}} and {{name}} and {{3}}");
+  });
+});
+
 describe("helpers", () => {
+  it("maps Meta's category back to the CRM's", () => {
+    expect(fromMetaCategory("MARKETING")).toBe("Marketing");
+    expect(fromMetaCategory("utility")).toBe("Utility");
+    expect(fromMetaCategory("AUTHENTICATION")).toBe("Authentication");
+    expect(fromMetaCategory(undefined)).toBeNull();
+  });
+
   it("lists positional variables once, in order of appearance", () => {
     expect(templateVariables("{{2}} and {{1}} and {{2}}")).toEqual([2, 1]);
   });
@@ -176,7 +217,8 @@ describe("Meta template calls", () => {
     const result = await createMessageTemplate({ wabaId: "WABA1", accessToken: "token", payload: { ...payload } });
 
     expect(result).toEqual({ id: "123", status: "PENDING", category: "MARKETING" });
-    expect(calls[0].url).toMatch(/\/WABA1\/message_templates$/);
+    // v21.0 stops working on 2027-01-21; the default must be newer.
+    expect(calls[0].url).toBe("https://graph.facebook.com/v24.0/WABA1/message_templates");
     expect(calls[0].init?.method).toBe("POST");
     expect(JSON.parse(String(calls[0].init?.body))).toEqual(payload);
   });

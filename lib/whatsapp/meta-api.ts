@@ -9,7 +9,7 @@
  * instead of a runtime rejection from Meta.
  */
 
-const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v21.0'
+const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v24.0'
 // WHATSAPP_GRAPH_API_BASE is only for pointing local tests at a mock Graph API.
 const META_API_BASE =
   process.env.WHATSAPP_GRAPH_API_BASE ?? `https://graph.facebook.com/${META_API_VERSION}`

@@ -8,6 +8,8 @@ import { isMediaHeaderType } from '@/lib/whatsapp/template-header'
 import { normalizeTemplateStatus } from '@/lib/whatsapp/template-status'
 import {
   buildTemplateCreatePayload,
+  fromMetaCategory,
+  normalizeVariables,
   parseStoredButtons,
   toMetaCategory,
   toMetaTemplateName,
@@ -213,6 +215,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       where: { id: template.id },
       data: {
         name,
+        // Store what Meta now has: {{ 1 }} written as {{1}}, and Meta's
+        // category, which can differ from the one submitted.
+        body_text: normalizeVariables(template.body_text.trim()),
+        ...(template.header_content
+          ? { header_content: normalizeVariables(template.header_content.trim()) }
+          : {}),
+        category: fromMetaCategory(created.category) ?? template.category,
         status: normalizeTemplateStatus(created.status) === 'Draft' ? 'Pending' : normalizeTemplateStatus(created.status),
         status_reason: null,
         meta_template_id: created.id,
@@ -225,6 +234,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         name: updated.name,
         status: updated.status,
         meta_template_id: updated.meta_template_id,
+        category: updated.category,
       },
     })
   } catch (err) {

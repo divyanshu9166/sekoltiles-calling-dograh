@@ -133,6 +133,9 @@ export function TemplateSubmitDialog({ template, onOpenChange, onSubmitted }: Te
         return;
       }
       toast.success(`${data?.data?.name ?? metaName} sent to Meta for review`);
+      if (data?.data?.category && data.data.category !== template.category) {
+        toast.info(`Meta filed it as ${data.data.category}, not ${template.category}.`);
+      }
       onOpenChange(false);
       onSubmitted();
     } catch (err) {

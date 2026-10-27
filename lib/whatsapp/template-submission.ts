@@ -87,6 +87,11 @@ export function templateVariables(text: string): number[] {
   return seen
 }
 
+/** Writes "{{ 1 }}" as "{{1}}", the only form Meta reads as a variable. */
+export function normalizeVariables(text: string): string {
+  return text.replace(/\{\{\s*(\d+)\s*\}\}/g, '{{$1}}')
+}
+
 /** How many example values a text needs: one per variable, {{1}}..{{n}}. */
 export function variableCount(text: string | null | undefined): number {
   if (!text) return 0
@@ -114,12 +119,33 @@ export function toMetaCategory(category: string): TemplateSubmitCategory | null 
   return upper === 'MARKETING' || upper === 'UTILITY' ? upper : null
 }
 
+/**
+ * Meta rejects variables that first appear out of order, so "Hi {{2}}, order
+ * {{1}}" fails even though both numbers exist. `vars` is in order of first
+ * appearance (templateVariables); a later repeat of an earlier one is fine.
+ */
+/**
+ * Meta's category back in the CRM's TitleCase. Meta may move a Utility
+ * template to Marketing when it is submitted; null when it sends none.
+ */
+export function fromMetaCategory(category: string | null | undefined): 'Marketing' | 'Utility' | 'Authentication' | null {
+  switch (String(category ?? '').toUpperCase()) {
+    case 'MARKETING':
+      return 'Marketing'
+    case 'UTILITY':
+      return 'Utility'
+    case 'AUTHENTICATION':
+      return 'Authentication'
+    default:
+      return null
+  }
+}
+
 function checkSequential(label: string, vars: number[]) {
-  const sorted = [...vars].sort((a, b) => a - b)
-  sorted.forEach((n, i) => {
+  vars.forEach((n, i) => {
     if (n !== i + 1) {
       throw new TemplateValidationError(
-        `${label} variables must be numbered in order starting at {{1}} (found {{${n}}}).`,
+        `${label} variables must appear in order: {{1}} first, then {{2}} and so on (found {{${n}}} where {{${i + 1}}} should be).`,
       )
     }
   })
@@ -162,14 +188,14 @@ function buildButton(button: TemplateButtonInput, index: number): Record<string,
   }
 
   if (button.type === 'URL') {
-    const url = String(button.url ?? '').trim()
+    const url = normalizeVariables(String(button.url ?? '').trim())
     if (!/^https?:\/\/\S+$/i.test(url)) {
       throw new TemplateValidationError(`${label} needs a link starting with https://.`)
     }
     checkLength(`${label} link`, url, TEMPLATE_LIMITS.url)
     const vars = templateVariables(url)
     if (vars.length === 0) return { type: 'URL', text, url }
-    if (vars.length > 1 || vars[0] !== 1 || !/\{\{\s*1\s*\}\}$/.test(url)) {
+    if (vars.length > 1 || vars[0] !== 1 || !url.endsWith('{{1}}')) {
       throw new TemplateValidationError(`${label} link can only have one variable, {{1}}, at the very end.`)
     }
     const example = String(button.example ?? '').trim()
@@ -234,8 +260,12 @@ export function buildTemplateCreatePayload(args: BuildTemplateCreatePayloadArgs)
 
   if (args.header) {
     if (args.header.format === 'TEXT') {
-      const text = args.header.text.trim()
-      if (!text) throw new TemplateValidationError('Header text is empty.')
+      const text = normalizeVariables(args.header.text.trim())
+      if (!text) {
+        throw new TemplateValidationError(
+          'This template has a text header but no header text. Delete it and create it again with header text, or with no header.',
+        )
+      }
       checkLength('Header text', text, TEMPLATE_LIMITS.headerText)
       const vars = templateVariables(text)
       if (vars.length > 1) throw new TemplateValidationError('Header text can have only one variable, {{1}}.')
@@ -252,7 +282,7 @@ export function buildTemplateCreatePayload(args: BuildTemplateCreatePayloadArgs)
     }
   }
 
-  const body = args.body.trim()
+  const body = normalizeVariables(args.body.trim())
   if (!body) throw new TemplateValidationError('Body text is required.')
   checkLength('Body text', body, TEMPLATE_LIMITS.body)
   const bodyVars = templateVariables(body)
