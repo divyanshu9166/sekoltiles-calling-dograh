@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Loader2, RefreshCw, Send, X } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,9 +25,16 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { MessageTemplate } from '@/types';
+import { TEMPLATE_LIMITS, type TemplateButtonInput } from '@/lib/whatsapp/template-submission';
+import { TemplateSubmitDialog } from './template-submit-dialog';
 
 const CATEGORIES = ['Marketing', 'Utility', 'Authentication'] as const;
 const HEADER_TYPES = ['text', 'image', 'video', 'document'] as const;
+const BUTTON_TYPES: { value: TemplateButtonInput['type']; label: string }[] = [
+  { value: 'QUICK_REPLY', label: 'Quick reply' },
+  { value: 'URL', label: 'Visit website' },
+  { value: 'PHONE_NUMBER', label: 'Call phone number' },
+];
 
 const categoryColors: Record<string, string> = {
   Marketing: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
@@ -48,7 +55,9 @@ interface TemplateFormData {
   language: string;
   body_text: string;
   header_type: string;
+  header_content: string;
   footer_text: string;
+  buttons: TemplateButtonInput[];
 }
 
 // Meta's language codes are exact — "en" and "en_US" are distinct and a
@@ -62,8 +71,15 @@ const emptyForm: TemplateFormData = {
   language: 'en_US',
   body_text: '',
   header_type: '',
+  header_content: '',
   footer_text: '',
+  buttons: [],
 };
+
+/** Meta template names: lowercase letters, numbers and underscores only. */
+function typedTemplateName(value: string) {
+  return value.toLowerCase().replace(/[\s-]+/g, '_').replace(/[^a-z0-9_]/g, '');
+}
 
 // Common Meta template language codes. The field still accepts any
 // string — this just offers autocomplete for the usual suspects. Full
@@ -97,6 +113,7 @@ export function TemplateManager() {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
+  const [submitTarget, setSubmitTarget] = useState<MessageTemplate | null>(null);
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -150,7 +167,14 @@ export function TemplateManager() {
         language: form.language.trim() || 'en_US',
         body_text: form.body_text.trim(),
         header_type: form.header_type || null,
+        header_content: form.header_type === 'text' ? form.header_content.trim() || null : null,
         footer_text: form.footer_text.trim() || null,
+        buttons: form.buttons.map((b) => ({
+          type: b.type,
+          text: b.text.trim(),
+          ...(b.type === 'URL' ? { url: (b.url ?? '').trim() } : {}),
+          ...(b.type === 'PHONE_NUMBER' ? { phone_number: (b.phone_number ?? '').trim() } : {}),
+        })),
         status: 'Draft' as const,
       };
 
@@ -170,7 +194,7 @@ export function TemplateManager() {
       if (user) await fetchTemplates();
     } catch (err) {
       console.error('Save error:', err);
-      toast.error('Failed to create template');
+      toast.error(err instanceof Error ? err.message : 'Failed to create template');
     } finally {
       setSaving(false);
     }
@@ -258,8 +282,8 @@ export function TemplateManager() {
         <div className="min-w-0">
           <h2 className="text-base sm:text-lg font-semibold text-foreground">Message Templates</h2>
           <p className="text-xs sm:text-sm text-muted mt-0.5">
-            Create and manage your WhatsApp message templates. Use &quot;Sync from
-            Meta&quot; to pull your approved list.
+            Create a template here and submit it to Meta for review, or use &quot;Sync from
+            Meta&quot; to pull templates made in WhatsApp Manager.
           </p>
         </div>
         <div className="ui-actions flex items-center gap-2 shrink-0">
@@ -334,14 +358,30 @@ export function TemplateManager() {
                     <p className="text-[10px] sm:text-xs text-red-400">{template.status_reason}</p>
                   )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleDelete(template.id)}
-                  className="text-muted hover:text-red-500 hover:bg-red-50 shrink-0 size-7 sm:size-8"
-                >
-                  <Trash2 className="size-3.5 sm:size-4" />
-                </Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {(template.status || 'Draft') === 'Draft' &&
+                    !template.meta_template_id &&
+                    template.category !== 'Authentication' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSubmitTarget(template)}
+                      className="border-border bg-transparent text-foreground hover:bg-surface-light text-xs h-7 sm:h-8"
+                      title="Send this template to Meta for approval"
+                    >
+                      <Send className="size-3.5" />
+                      <span className="hidden sm:inline">Submit to Meta</span>
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDelete(template.id)}
+                    className="text-muted hover:text-red-500 hover:bg-red-50 shrink-0 size-7 sm:size-8"
+                  >
+                    <Trash2 className="size-3.5 sm:size-4" />
+                  </Button>
+                </div>
               </div>
             </div>
           ))}
@@ -364,8 +404,11 @@ export function TemplateManager() {
               <Input
                 placeholder="e.g. order_confirmation"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => setForm({ ...form, name: typedTemplateName(e.target.value) })}
               />
+              <p className="text-[10px] sm:text-[11px] text-muted">
+                Lowercase letters, numbers and underscores, as Meta requires.
+              </p>
             </div>
 
             {/* Responsive: 2-col on sm+, 1-col on mobile */}
@@ -431,7 +474,24 @@ export function TemplateManager() {
                   ))}
                 </SelectContent>
               </Select>
+              {(form.header_type === 'image' || form.header_type === 'video' || form.header_type === 'document') && (
+                <p className="text-[10px] sm:text-[11px] text-muted">
+                  You&apos;ll attach a sample file when you submit it to Meta.
+                </p>
+              )}
             </div>
+
+            {form.header_type === 'text' && (
+              <div className="space-y-1.5">
+                <Label className="text-foreground text-xs sm:text-sm">Header Text</Label>
+                <Input
+                  placeholder="Up to 60 characters. One variable, {{1}}, allowed."
+                  maxLength={TEMPLATE_LIMITS.headerText}
+                  value={form.header_content}
+                  onChange={(e) => setForm({ ...form, header_content: e.target.value })}
+                />
+              </div>
+            )}
 
             <div className="space-y-1.5">
               <Label className="text-foreground text-xs sm:text-sm">Body Text</Label>
@@ -450,7 +510,85 @@ export function TemplateManager() {
                 placeholder="Optional footer text"
                 value={form.footer_text}
                 onChange={(e) => setForm({ ...form, footer_text: e.target.value })}
+                maxLength={TEMPLATE_LIMITS.footer}
               />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-foreground text-xs sm:text-sm">Buttons</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={form.buttons.length >= TEMPLATE_LIMITS.buttons}
+                  onClick={() => setForm({ ...form, buttons: [...form.buttons, { type: 'QUICK_REPLY', text: '' }] })}
+                  className="border-border bg-transparent text-foreground hover:bg-surface-light text-xs h-7"
+                >
+                  <Plus className="size-3.5" />
+                  Add button
+                </Button>
+              </div>
+              {form.buttons.length === 0 && (
+                <p className="text-[10px] sm:text-[11px] text-muted">
+                  Optional. Up to 10, with at most 2 website buttons and 1 call button.
+                </p>
+              )}
+              {form.buttons.map((button, i) => {
+                const update = (patch: Partial<TemplateButtonInput>) =>
+                  setForm({ ...form, buttons: form.buttons.map((b, j) => (j === i ? { ...b, ...patch } : b)) });
+                return (
+                  <div key={i} className="rounded-md border border-border p-2.5 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={button.type}
+                        onValueChange={(val) => update({ type: val as TemplateButtonInput['type'] })}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {BUTTON_TYPES.map((t) => (
+                            <SelectItem key={t.value} value={t.value}>
+                              {t.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setForm({ ...form, buttons: form.buttons.filter((_, j) => j !== i) })}
+                        className="text-muted hover:text-red-500 shrink-0 size-8"
+                        title="Remove button"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                    <Input
+                      placeholder="Button label (up to 25 characters)"
+                      maxLength={TEMPLATE_LIMITS.buttonText}
+                      value={button.text}
+                      onChange={(e) => update({ text: e.target.value })}
+                    />
+                    {button.type === 'URL' && (
+                      <Input
+                        placeholder="https://example.com/page (may end in {{1}})"
+                        value={button.url ?? ''}
+                        onChange={(e) => update({ url: e.target.value })}
+                      />
+                    )}
+                    {button.type === 'PHONE_NUMBER' && (
+                      <Input
+                        placeholder="Phone with country code, e.g. 919876543210"
+                        value={button.phone_number ?? ''}
+                        onChange={(e) => update({ phone_number: e.target.value })}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -479,6 +617,14 @@ export function TemplateManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TemplateSubmitDialog
+        template={submitTarget}
+        onOpenChange={(open) => {
+          if (!open) setSubmitTarget(null);
+        }}
+        onSubmitted={fetchTemplates}
+      />
     </div>
   );
 }

@@ -463,6 +463,8 @@ model WaMessageTemplate {
   status         String   @default("Draft")
   /// Meta's reason for a rejected, paused or disabled template.
   status_reason  String?
+  /// Meta's ID for the template, set when it is submitted or synced.
+  meta_template_id String?
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 

@@ -604,3 +604,155 @@ export async function sendInteractiveButtonMessage(
   const data = await response.json()
   return { messageId: data.messages[0].id }
 }
+
+// ============================================================
+// Template submission
+// ============================================================
+
+interface MetaTemplateErrorResponse {
+  error?: {
+    message?: string
+    error_user_title?: string
+    error_user_msg?: string
+  }
+}
+
+/**
+ * Template review errors carry the useful text in error_user_title /
+ * error_user_msg ("Invalid parameter" alone tells the user nothing).
+ */
+async function throwMetaTemplateError(response: Response, fallback: string): Promise<never> {
+  let message = fallback
+  try {
+    const { error } = (await response.json()) as MetaTemplateErrorResponse
+    const title = error?.error_user_title?.trim()
+    const detail = error?.error_user_msg?.trim()
+    if (title && detail) message = `${title}: ${detail}`
+    else if (detail || title) message = (detail || title) as string
+    else if (error?.message) message = error.message
+  } catch {
+    // response body wasn't JSON — keep the fallback
+  }
+  throw new Error(message)
+}
+
+export interface CreateMessageTemplateArgs {
+  wabaId: string
+  accessToken: string
+  /** Request body from buildTemplateCreatePayload. */
+  payload: Record<string, unknown>
+}
+
+export interface MetaCreatedTemplate {
+  id: string
+  status: string
+  category?: string
+}
+
+/**
+ * Submit a template for Meta's review. It comes back PENDING; the result
+ * arrives later on the message_template_status_update webhook.
+ *
+ * @see https://developers.facebook.com/docs/whatsapp/business-management-api/message-templates
+ */
+export async function createMessageTemplate(
+  args: CreateMessageTemplateArgs,
+): Promise<MetaCreatedTemplate> {
+  const { wabaId, accessToken, payload } = args
+  const response = await fetch(`${META_API_BASE}/${wabaId}/message_templates`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok) {
+    await throwMetaTemplateError(response, `Template submission failed: ${response.status}`)
+  }
+  const data = await response.json()
+  if (!data.id) throw new Error('Template ID not found in Meta response')
+  return { id: String(data.id), status: String(data.status ?? 'PENDING'), category: data.category }
+}
+
+export interface GetTokenAppIdArgs {
+  accessToken: string
+}
+
+/**
+ * The Meta app a token belongs to, needed for the Resumable Upload API.
+ *
+ * @see https://developers.facebook.com/docs/graph-api/reference/debug_token
+ */
+export async function getTokenAppId(args: GetTokenAppIdArgs): Promise<string> {
+  const { accessToken } = args
+  const params = new URLSearchParams({ input_token: accessToken })
+  const response = await fetch(`${META_API_BASE}/debug_token?${params}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Could not read the Meta app ID: ${response.status}`)
+  }
+  const data = await response.json()
+  const appId = data?.data?.app_id
+  if (!appId) throw new Error('Meta app ID not found for this access token')
+  return String(appId)
+}
+
+export interface UploadTemplateSampleArgs {
+  appId: string
+  accessToken: string
+  file: Blob
+  filename: string
+  /** image/jpeg, image/png, video/mp4 or application/pdf. */
+  mimeType: string
+}
+
+/**
+ * Upload a sample photo, video or PDF for a media-header template with the
+ * Resumable Upload API and return the handle that goes in
+ * `example.header_handle`. This is not the same as uploadMedia: a media ID
+ * from /media is rejected when creating a template.
+ *
+ * @see https://developers.facebook.com/docs/graph-api/guides/upload
+ */
+export async function uploadTemplateSample(
+  args: UploadTemplateSampleArgs,
+): Promise<{ handle: string }> {
+  const { appId, accessToken, file, filename, mimeType } = args
+  const bytes = await file.arrayBuffer()
+
+  const params = new URLSearchParams({
+    file_name: filename,
+    file_length: String(bytes.byteLength),
+    file_type: mimeType,
+  })
+  const session = await fetch(`${META_API_BASE}/${appId}/uploads?${params}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!session.ok) {
+    await throwMetaError(session, `Sample upload failed to start: ${session.status}`)
+  }
+  const sessionId = (await session.json())?.id
+  if (typeof sessionId !== 'string' || !sessionId.startsWith('upload:')) {
+    throw new Error('Upload session ID not found in Meta response')
+  }
+
+  // This step must use "OAuth", not "Bearer", and the raw bytes as the body.
+  const upload = await fetch(`${META_API_BASE}/${sessionId}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `OAuth ${accessToken}`,
+      file_offset: '0',
+      'Content-Type': mimeType,
+    },
+    body: bytes,
+  })
+  if (!upload.ok) {
+    await throwMetaError(upload, `Sample upload failed: ${upload.status}`)
+  }
+  const handle = (await upload.json())?.h
+  if (typeof handle !== 'string' || !handle) throw new Error('File handle not found in Meta response')
+  return { handle }
+}

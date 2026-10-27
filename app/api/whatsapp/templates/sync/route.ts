@@ -161,6 +161,7 @@ export async function POST() {
         buttons: buttons?.buttons as any ?? null,
         status: normalizeTemplateStatus(t.status),
         status_reason: templateStatusReason(t.status, t.rejected_reason),
+        meta_template_id: t.id,
       }
 
       try {

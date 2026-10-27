@@ -135,6 +135,8 @@ export interface MessageTemplate {
   status?: 'Draft' | 'Pending' | 'Approved' | 'Rejected';
   /** Meta's reason for a rejected, paused or disabled template. */
   status_reason?: string | null;
+  /** Meta's template ID once submitted or synced. */
+  meta_template_id?: string | null;
   created_at: string;
 }
 
