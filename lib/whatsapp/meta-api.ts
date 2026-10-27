@@ -31,15 +31,30 @@ interface MetaErrorResponse {
   error?: { message?: string; code?: number; type?: string }
 }
 
+/** A Graph API error, keeping Meta's numeric code (e.g. 130429) and the HTTP status. */
+export class MetaApiError extends Error {
+  readonly code?: number
+  readonly httpStatus: number
+
+  constructor(message: string, httpStatus: number, code?: number) {
+    super(message)
+    this.name = 'MetaApiError'
+    this.httpStatus = httpStatus
+    this.code = code
+  }
+}
+
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
+  let code: number | undefined
   try {
     const data = (await response.json()) as MetaErrorResponse
     if (data.error?.message) message = data.error.message
+    if (typeof data.error?.code === 'number') code = data.error.code
   } catch {
     // response body wasn't JSON — keep the fallback
   }
-  throw new Error(message)
+  throw new MetaApiError(message, response.status, code)
 }
 
 // ============================================================

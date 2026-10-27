@@ -13,7 +13,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Users, Save, CalendarClock } from 'lucide-react';
+import { dateToIstInput, formatIst, istInputToDate } from '@/lib/whatsapp/ist-time';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
 type CustomFieldOperator = 'is' | 'is_not' | 'contains';
@@ -38,11 +39,17 @@ interface Step4Props {
   onNameChange: (name: string) => void;
   template: MessageTemplate;
   audience: AudienceConfig;
-  onSend: () => void;
+  /** `scheduledAt` is set when the user chose to send later. */
+  onSend: (scheduledAt?: Date) => void;
   onSaveDraft?: () => void;
   onBack: () => void;
   isProcessing: boolean;
-  progress: number;
+}
+
+/** One hour from now, rounded up to the next quarter hour, in IST. */
+function defaultScheduleInput() {
+  const quarter = 15 * 60 * 1000;
+  return dateToIstInput(new Date(Math.ceil((Date.now() + 60 * 60 * 1000) / quarter) * quarter));
 }
 
 export function Step4ScheduleSend({
@@ -54,9 +61,26 @@ export function Step4ScheduleSend({
   onSaveDraft,
   onBack,
   isProcessing,
-  progress,
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
+  const [when, setWhen] = useState<'now' | 'later'>('now');
+  const [scheduleInput, setScheduleInput] = useState(defaultScheduleInput);
+  // Ticks so a time that slips into the past while the page is open is caught.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => clearInterval(timer);
+  }, []);
+  const scheduledAt = when === 'later' ? istInputToDate(scheduleInput.date, scheduleInput.time) : null;
+  const scheduleError =
+    when !== 'later'
+      ? null
+      : !scheduledAt
+        ? 'Pick a date and time.'
+        : scheduledAt.getTime() < nowMs + 60_000
+          ? 'Pick a time at least a minute from now.'
+          : null;
+  const canSend = !!name.trim() && !isProcessing && !scheduleError;
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [optedOutCount, setOptedOutCount] = useState(0);
   const [loadingReach, setLoadingReach] = useState(true);
@@ -109,7 +133,7 @@ export function Step4ScheduleSend({
       <div>
         <h2 className="text-lg font-semibold text-foreground">Review and Send</h2>
         <p className="mt-1 text-sm text-muted">
-          Name your broadcast, review the details, and send.
+          Name your broadcast, review the details, and send it now or schedule it.
         </p>
       </div>
 
@@ -160,22 +184,65 @@ export function Step4ScheduleSend({
         </div>
       </div>
 
-      {/* Processing overlay */}
-      {isProcessing && (
-        <div className="rounded-xl border border-accent/20 bg-accent-light p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-accent" />
-              <p className="text-sm font-medium text-foreground">Sending broadcast...</p>
+      {/* When to send */}
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-foreground">When to send</p>
+        <div className="inline-flex rounded-lg border border-border p-0.5" role="radiogroup" aria-label="When to send">
+          {(['now', 'later'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={when === option}
+              onClick={() => setWhen(option)}
+              disabled={isProcessing}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                when === option ? 'bg-accent text-white' : 'text-muted hover:text-foreground'
+              }`}
+            >
+              {option === 'now' ? 'Send now' : 'Schedule'}
+            </button>
+          ))}
+        </div>
+        {when === 'later' && (
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                aria-label="Send date (IST)"
+                value={scheduleInput.date}
+                min={dateToIstInput(new Date(nowMs)).date}
+                onChange={(e) => setScheduleInput((s) => ({ ...s, date: e.target.value }))}
+                className="w-auto"
+              />
+              <Input
+                type="time"
+                aria-label="Send time (IST)"
+                value={scheduleInput.time}
+                onChange={(e) => setScheduleInput((s) => ({ ...s, time: e.target.value }))}
+                className="w-auto"
+              />
+              <span className="text-sm text-muted">IST</span>
             </div>
-            <span className="text-xs font-medium text-accent">{progress}%</span>
+            {scheduleError ? (
+              <p className="text-xs text-red-400">{scheduleError}</p>
+            ) : (
+              scheduledAt && (
+                <p className="text-xs text-muted">
+                  Sends on {formatIst(scheduledAt)}. Customers who opt out before then are skipped.
+                </p>
+              )
+            )}
           </div>
-          <div className="h-1.5 w-full rounded-full bg-surface-light">
-            <div
-              className="h-1.5 rounded-full bg-accent transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+        )}
+      </div>
+
+      {isProcessing && (
+        <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent-light p-4">
+          <Loader2 className="h-4 w-4 animate-spin text-accent" />
+          <p className="text-sm font-medium text-foreground">
+            {when === 'later' ? 'Scheduling broadcast...' : 'Starting broadcast...'}
+          </p>
         </div>
       )}
 
@@ -207,23 +274,38 @@ export function Step4ScheduleSend({
             <DialogTrigger
               render={
                 <Button
-                  disabled={!name.trim() || isProcessing}
+                  disabled={!canSend}
                   className="bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
                 />
               }
             >
-              <Send className="h-4 w-4" />
-              Send Broadcast
+              {when === 'later' ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              {when === 'later' ? 'Schedule Broadcast' : 'Send Broadcast'}
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-foreground">Confirm Broadcast</DialogTitle>
+                <DialogTitle className="text-foreground">
+                  {when === 'later' ? 'Confirm Schedule' : 'Confirm Broadcast'}
+                </DialogTitle>
                 <DialogDescription className="text-muted">
-                  You are about to send this broadcast to{' '}
-                  <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
-                  contacts using the{' '}
-                  <span className="font-medium text-foreground">{template.name}</span> template.
-                  This action cannot be undone.
+                  {when === 'later' && scheduledAt ? (
+                    <>
+                      This broadcast will go to about{' '}
+                      <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
+                      contacts using the{' '}
+                      <span className="font-medium text-foreground">{template.name}</span> template on{' '}
+                      <span className="font-medium text-foreground">{formatIst(scheduledAt)}</span>.
+                      You can cancel it until then.
+                    </>
+                  ) : (
+                    <>
+                      You are about to send this broadcast to{' '}
+                      <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
+                      contacts using the{' '}
+                      <span className="font-medium text-foreground">{template.name}</span> template.
+                      It keeps sending even if you close this tab.
+                    </>
+                  )}
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -237,12 +319,13 @@ export function Step4ScheduleSend({
                 <Button
                   onClick={() => {
                     setShowConfirm(false);
-                    onSend();
+                    onSend(scheduledAt ?? undefined);
                   }}
+                  disabled={!canSend}
                   className="bg-accent text-white hover:bg-accent-hover"
                 >
-                  <Send className="h-4 w-4" />
-                  Confirm and Send
+                  {when === 'later' ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                  {when === 'later' ? 'Confirm and Schedule' : 'Confirm and Send'}
                 </Button>
               </DialogFooter>
             </DialogContent>

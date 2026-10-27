@@ -8,11 +8,9 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   normalizePhoneForMetaIndia,
   isValidE164,
-  phoneVariants,
-  isRecipientNotAllowedError,
-  isRecipientNotRegisteredError,
   humanReadableMetaError,
 } from '@/lib/whatsapp/phone-utils'
+import { sendTemplateToPhone } from '@/lib/whatsapp/broadcast-sender'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -162,45 +160,22 @@ export async function POST(request: Request) {
         continue
       }
 
-      // Retry with phone variants on sandbox "not in allowed list"
-      // errors. A missing trunk-prefix 0 can surface as this error
-      // depending on the registered format.
-      const variants = phoneVariants(sanitized)
+      // Retries with phone variants on sandbox "not in allowed list" errors.
       let sentMessageId: string | null = null
       let lastError: string | null = null
-
-      for (const variant of variants) {
-        try {
-          const result = await sendTemplateMessage({
-            phoneNumberId: config.phone_number_id,
-            accessToken,
-            to: variant,
-            templateName: template_name,
-            language: template_language || 'en_US',
-            ...(headerMedia
-              ? { componentParams: { body: recipient.params ?? [], headerMedia } }
-              : { params: recipient.params ?? [] }),
-          })
-          sentMessageId = result.messageId
-          lastError = null
-          break
-        } catch (error) {
-          const errorMessage =
-            error instanceof Error ? error.message : 'Unknown error'
-          // "Account not registered" (#133010) is a sender-side config
-          // issue — retrying with phone variants won't help. Break
-          // immediately with a clear message.
-          if (isRecipientNotRegisteredError(errorMessage)) {
-            lastError = errorMessage
-            break
-          }
-          if (!isRecipientNotAllowedError(errorMessage)) {
-            lastError = errorMessage
-            break
-          }
-          lastError = errorMessage
-          // retry with next variant
-        }
+      try {
+        const result = await sendTemplateToPhone(sendTemplateMessage, sanitized, {
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          templateName: template_name,
+          language: template_language || 'en_US',
+          ...(headerMedia
+            ? { componentParams: { body: recipient.params ?? [], headerMedia } }
+            : { params: recipient.params ?? [] }),
+        })
+        sentMessageId = result.messageId
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : 'Unknown error'
       }
 
       if (sentMessageId) {

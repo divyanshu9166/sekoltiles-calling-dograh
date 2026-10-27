@@ -3,9 +3,9 @@
  *
  * Next.js instrumentation hook — runs once when the server starts.
  *
- * Boots the WhatsApp Marketing BullMQ workers (automations and the AI agent)
- * so they are registered before the first webhook arrives. Both need Redis
- * (REDIS_URL); see lib/queues/jobs.ts.
+ * Boots the WhatsApp Marketing BullMQ workers (automations, the AI agent and
+ * broadcast sending) so they are registered before the first webhook
+ * arrives. All need Redis ≥ 5 (REDIS_URL); see lib/queues/jobs.ts.
  */
 
 export async function register() {
@@ -17,5 +17,8 @@ export async function register() {
 
     const { startAiAgentWorker } = await import('./lib/queues/ai-agent-worker')
     startAiAgentWorker()
+
+    const { startBroadcastSendWorker } = await import('./lib/queues/broadcast-send-worker')
+    startBroadcastSendWorker()
   }
 }

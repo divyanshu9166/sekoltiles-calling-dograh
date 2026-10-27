@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
+import { enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'
+import { parseScheduledAt } from '@/lib/whatsapp/broadcast-schedule'
 
 export async function POST(request: Request) {
   try {
@@ -10,6 +13,23 @@ export async function POST(request: Request) {
 
     const payload = await request.json()
     const { name, template, audience, variables } = payload
+
+    if (!template?.name || !audience?.type) {
+      return NextResponse.json({ error: 'Template and audience are required' }, { status: 400 })
+    }
+
+    // Photo/video/PDF for a template with a media header, uploaded once
+    // through /api/whatsapp/media/upload and reused for every recipient.
+    const headerMedia = parseHeaderMedia(payload.header_media)
+    if (payload.header_media && !headerMedia) {
+      return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
+    }
+
+    const schedule = parseScheduledAt(payload.scheduled_at)
+    if ('error' in schedule) {
+      return NextResponse.json({ error: schedule.error }, { status: 400 })
+    }
+    const scheduledAt = schedule.scheduledAt
 
     let contacts: any[] = []
 
@@ -112,7 +132,9 @@ export async function POST(request: Request) {
         template_language: template.language ?? 'en_US',
         template_variables: variables ?? {},
         audience_filter: audience,
-        status: 'sending',
+        ...(headerMedia ? { header_media: { ...headerMedia } } : {}),
+        scheduled_at: scheduledAt,
+        status: scheduledAt ? 'scheduled' : 'sending',
         total_recipients: contacts.length,
         sent_count: 0,
         delivered_count: 0,
@@ -122,43 +144,31 @@ export async function POST(request: Request) {
       }
     })
 
-    const recipientRows = contacts.map(contact => ({
-      broadcast_id: broadcast.id,
-      contact_id: contact.id,
-      status: 'pending',
-    }))
-
     await prisma.waBroadcastRecipient.createMany({
-      data: recipientRows as any
+      data: contacts.map(contact => ({
+        broadcast_id: broadcast.id,
+        contact_id: contact.id,
+        status: 'pending',
+      })),
     })
 
-    // Fetch custom values for all contacts in this broadcast
-    const contactIds = contacts.map(c => c.id)
-    const customValues = await prisma.waContactCustomValue.findMany({
-      where: { contact_id: { in: contactIds } },
-      select: { contact_id: true, custom_field_id: true, value: true }
-    })
-    
-    // Group custom values by contact
-    const customValueIndex = customValues.reduce((acc, curr) => {
-      if (!acc[curr.contact_id]) acc[curr.contact_id] = {}
-      acc[curr.contact_id][curr.custom_field_id] = curr.value || ''
-      return acc
-    }, {} as Record<string, Record<string, string>>)
-
-    const recipientsWithData = contacts.map(c => ({
-      id: recipientRows.find(r => r.contact_id === c.id)?.contact_id, // we don't have the exact recipient ID from createMany, but we can return contact ID and phone
-      contact_id: c.id,
-      phone: c.phone,
-      name: c.name,
-      email: c.email,
-      company: c.company,
-      custom_values: customValueIndex[c.id] || {}
-    }))
+    // The worker (lib/queues/broadcast-send-worker.ts) does the sending, so
+    // it carries on after the browser tab closes.
+    try {
+      await enqueueBroadcastSend(broadcast.id, scheduledAt)
+    } catch (queueError) {
+      console.error('Could not queue broadcast:', queueError)
+      await prisma.waBroadcast.delete({ where: { id: broadcast.id } }).catch(() => {})
+      return NextResponse.json(
+        { error: 'Could not start the broadcast: the sending queue (Redis) is unavailable. Nothing was sent.' },
+        { status: 503 },
+      )
+    }
 
     return NextResponse.json({
       broadcastId: broadcast.id,
-      recipients: recipientsWithData,
+      status: broadcast.status,
+      total: contacts.length,
       skippedOptedOut: optedOutCount,
     })
   } catch (error) {

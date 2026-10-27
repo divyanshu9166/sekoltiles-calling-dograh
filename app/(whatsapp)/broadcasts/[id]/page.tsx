@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Broadcast, BroadcastRecipient, RecipientStatus } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -31,12 +31,15 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  CalendarClock,
+  Ban,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getBroadcastStatus,
   getRecipientStatus,
 } from '@/lib/broadcast-status';
+import { formatIst } from '@/lib/whatsapp/ist-time';
 
 interface StatCardProps {
   label: string;
@@ -115,7 +118,14 @@ const RECIPIENT_STATUSES: readonly RecipientStatus[] = [
   'read',
   'replied',
   'failed',
+  'skipped',
 ];
+
+function countByStatus(recipients: BroadcastRecipient[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of recipients) counts[r.status] = (counts[r.status] ?? 0) + 1;
+  return counts;
+}
 
 // CSV export helper - RFC 4180 quoting. Quote every field so
 // commas, newlines, and quotes round-trip cleanly.
@@ -148,26 +158,57 @@ export default function BroadcastDetailPage() {
   const [statusFilter, setStatusFilter] = useState<RecipientStatus | 'all'>('all');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  // Recipient counts by status, kept fresh by polling while the server sends.
+  const [counts, setCounts] = useState<Record<string, number>>({});
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}`, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error('Failed to load broadcast');
+      }
+      const data = await res.json();
+      const rows: BroadcastRecipient[] = data.recipients ?? [];
+      setBroadcast(data.broadcast);
+      setRecipients(rows);
+      setCounts(countByStatus(rows));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load broadcast');
+    } finally {
+      setLoading(false);
+    }
+  }, [broadcastId]);
 
   useEffect(() => {
-    async function fetchData() {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+  }, [fetchData]);
+
+  // The worker sends in the background; poll its progress while the
+  // broadcast is scheduled or sending (slowly while it is only scheduled).
+  const liveStatus = broadcast?.status === 'sending' || broadcast?.status === 'scheduled' ? broadcast.status : null;
+  useEffect(() => {
+    if (!liveStatus) return;
+    let ticks = 0;
+    const timer = setInterval(async () => {
+      if (document.visibilityState === 'hidden') return;
+      ticks++;
       try {
-        const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}`);
-        if (!res.ok) {
-          throw new Error('Failed to load broadcast');
-        }
+        const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}/progress`, { cache: 'no-store' });
+        if (!res.ok) return;
         const data = await res.json();
         setBroadcast(data.broadcast);
-        setRecipients(data.recipients ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load broadcast');
-      } finally {
-        setLoading(false);
+        setCounts(data.counts ?? {});
+        // Refresh the recipient table now and then, and once at the end.
+        if (data.broadcast.status !== liveStatus || ticks % 5 === 0) fetchData();
+      } catch {
+        // Try again on the next tick.
       }
-    }
-
-    fetchData();
-  }, [broadcastId]);
+    }, liveStatus === 'sending' ? 3000 : 15000);
+    return () => clearInterval(timer);
+  }, [liveStatus, broadcastId, fetchData]);
 
   const filteredRecipients = useMemo(
     () =>
@@ -202,6 +243,24 @@ export default function BroadcastDetailPage() {
     const csv = toCsv([header, ...rows]);
     const safeName = broadcast.name.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase();
     downloadBlob(`broadcast-${safeName}-${broadcastId.slice(0, 8)}.csv`, csv);
+  }
+
+  async function handleCancel() {
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}/cancel`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to cancel broadcast');
+      }
+      toast.success(broadcast?.status === 'scheduled' ? 'Broadcast cancelled' : 'Broadcast stopped');
+      setConfirmCancel(false);
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setCancelling(false);
+    }
   }
 
   async function handleDelete() {
@@ -242,6 +301,9 @@ export default function BroadcastDetailPage() {
   }
 
   const status = getBroadcastStatus(broadcast.status);
+  const progressTotal = Object.values(counts).reduce((sum, n) => sum + n, 0);
+  const progressDone = progressTotal - (counts.pending ?? 0);
+  const skippedCount = counts.skipped ?? 0;
 
   const funnelSteps: FunnelStep[] = [
     { label: 'Sent', value: broadcast.sent_count, color: 'bg-violet-500' },
@@ -323,6 +385,86 @@ export default function BroadcastDetailPage() {
           </Button>
         )}
       </div>
+
+      {/* Scheduled / sending: runs on the server, so this tab can be closed. */}
+      {(broadcast.status === 'scheduled' || broadcast.status === 'sending') && (
+        <div className="glass-card space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {broadcast.status === 'scheduled' ? (
+                <CalendarClock className="h-4 w-4 text-blue-400" />
+              ) : (
+                <Loader2 className="h-4 w-4 animate-spin text-accent" />
+              )}
+              <p className="text-sm font-medium text-foreground">
+                {broadcast.status === 'scheduled'
+                  ? `Scheduled for ${broadcast.scheduled_at ? formatIst(broadcast.scheduled_at) : 'later'}`
+                  : `Sending: ${progressDone.toLocaleString()} of ${progressTotal.toLocaleString()} done`}
+              </p>
+            </div>
+            {confirmCancel ? (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted">
+                  {broadcast.status === 'scheduled' ? 'Cancel this broadcast?' : 'Stop sending to the rest?'}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmCancel(false)}
+                  disabled={cancelling}
+                  className="h-7 border-border"
+                >
+                  No
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleCancel}
+                  disabled={cancelling}
+                  className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {cancelling ? 'Working...' : 'Yes'}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmCancel(true)}
+                className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10"
+              >
+                <Ban className="h-3.5 w-3.5" />
+                {broadcast.status === 'scheduled' ? 'Cancel broadcast' : 'Stop sending'}
+              </Button>
+            )}
+          </div>
+          {broadcast.status === 'sending' && (
+            <div className="h-1.5 w-full rounded-full bg-surface-light">
+              <div
+                className="h-1.5 rounded-full bg-accent transition-all duration-500"
+                style={{ width: `${progressTotal ? Math.round((progressDone / progressTotal) * 100) : 0}%` }}
+              />
+            </div>
+          )}
+          <p className="text-xs text-muted">
+            This runs on the server: you can close this tab.
+            {broadcast.status === 'scheduled' && ' Customers who opt out before the send time are skipped.'}
+          </p>
+        </div>
+      )}
+
+      {broadcast.error_message && (
+        <div className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>{broadcast.error_message}</p>
+        </div>
+      )}
+
+      {skippedCount > 0 && (
+        <p className="text-xs text-muted">
+          {skippedCount.toLocaleString()} recipient{skippedCount === 1 ? ' was' : 's were'} skipped
+          (opted out of marketing, or the broadcast was cancelled).
+        </p>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

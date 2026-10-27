@@ -9,6 +9,7 @@
  * │  automation-queue   │ run automation    │ 3       │ Exponential 5 s │
  * │  broadcast-status   │ sync counts       │ 5       │ Exponential 2 s │
  * │  message-delivery   │ retry failed send │ 3       │ Fixed 10 s      │
+ * │  wa-broadcast-send  │ send a broadcast  │ 6       │ Exponential 60 s│
  * └─────────────────────────────────────────────────────────────────────┘
  *
  * Workers are imported separately so they only run in the right process
@@ -55,6 +56,7 @@ export const QUEUE_BROADCAST_STATUS = 'broadcast-status-queue'
 export const QUEUE_MESSAGE_DELIVERY = 'message-delivery-queue'
 export const QUEUE_AI_AGENT = 'wa-ai-agent'
 export const QUEUE_FOLLOWUP_REMINDERS = 'followup-reminders-queue'
+export const QUEUE_BROADCAST_SEND = 'wa-broadcast-send'
 
 // ── Typed job data shapes ──────────────────────────────────────────────────
 
@@ -84,6 +86,10 @@ export interface MessageDeliveryJobData {
   userId: string
   messageId: string      // internal DB id
   metaMessageId?: string // Meta's wa_id for status lookups
+}
+
+export interface BroadcastSendJobData {
+  broadcastId: string
 }
 
 export interface AiAgentJobData {
@@ -233,5 +239,35 @@ export function createFollowUpReminderWorker(handler: WorkerHandler<unknown>): W
   return new Worker(QUEUE_FOLLOWUP_REMINDERS, handler, {
     connection,
     concurrency: 1,
+  })
+}
+
+// ── Broadcast sending (one job per broadcast, delayed when scheduled) ───────
+let _broadcastSendQueue: Queue<BroadcastSendJobData> | undefined
+export function getBroadcastSendQueue() {
+  if (!_broadcastSendQueue) {
+    _broadcastSendQueue = new Queue<BroadcastSendJobData>(QUEUE_BROADCAST_SEND, {
+      connection,
+      defaultJobOptions: {
+        // Retries are for rate-limited recipients and transient errors; the
+        // job only ever sends to recipients still `pending`.
+        attempts: 6,
+        backoff: { type: 'exponential', delay: 60_000 },
+        // Removed when done so the same jobId can be queued again later.
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
+    })
+  }
+  return _broadcastSendQueue
+}
+
+export function createBroadcastSendWorker(
+  handler: (job: Job<BroadcastSendJobData>) => Promise<unknown>,
+): Worker {
+  // Two broadcasts at once; each is throttled on its own (see broadcast-sender.ts).
+  return new Worker<BroadcastSendJobData>(QUEUE_BROADCAST_SEND, handler, {
+    connection,
+    concurrency: 2,
   })
 }

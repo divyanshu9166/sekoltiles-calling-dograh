@@ -22,7 +22,7 @@ const steps = [
 
 export default function NewBroadcastPage() {
   const router = useRouter();
-  const { createAndSendBroadcast, isProcessing, progress } = useBroadcastSending();
+  const { createAndSendBroadcast, isProcessing } = useBroadcastSending();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
@@ -50,7 +50,7 @@ export default function NewBroadcastPage() {
     resetHeaderUpload();
   }, [template?.id, resetHeaderUpload]);
 
-  async function handleSend() {
+  async function handleSend(scheduledAt?: Date) {
     if (!template) return;
 
     try {
@@ -69,7 +69,9 @@ export default function NewBroadcastPage() {
         headerMedia: headerUpload.media
           ? { type: headerUpload.media.type, id: headerUpload.media.id, filename: headerUpload.media.filename }
           : undefined,
+        scheduledAt,
       });
+      toast.success(scheduledAt ? 'Broadcast scheduled' : 'Broadcast is sending');
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
       // Previously swallowed with console.error, the wizard would just no-op.
@@ -225,7 +227,6 @@ export default function NewBroadcastPage() {
               onSaveDraft={handleSaveDraft}
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
-              progress={progress}
             />
           )}
         </div>

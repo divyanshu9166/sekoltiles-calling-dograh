@@ -540,8 +540,13 @@ model WaBroadcast {
   template_language String  @default("en_US")
   template_variables Json?
   audience_filter  Json?
+  /// Photo/video/PDF for a media-header template: { type, id, filename? }.
+  header_media     Json?
   scheduled_at     DateTime?
+  /// draft | scheduled | sending | sent | failed | cancelled
   status           String   @default("draft")
+  /// Why the whole broadcast stopped or failed (e.g. WhatsApp not connected).
+  error_message    String?
   total_recipients Int      @default(0)
   sent_count       Int      @default(0)
   delivered_count  Int      @default(0)

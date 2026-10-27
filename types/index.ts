@@ -183,8 +183,9 @@ export interface Deal {
   assignee?: Profile;
 }
 
-export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
-export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
+export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'cancelled';
+/** `skipped`: not sent because the contact opted out or the broadcast was cancelled. */
+export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
 
 export interface Broadcast {
   id: string;
@@ -194,8 +195,10 @@ export interface Broadcast {
   template_language: string;
   template_variables?: Record<string, unknown>;
   audience_filter?: Record<string, unknown>;
-  scheduled_at?: string;
+  scheduled_at?: string | null;
   status: BroadcastStatus;
+  /** Why the whole broadcast stopped or failed. */
+  error_message?: string | null;
   total_recipients: number;
   sent_count: number;
   delivered_count: number;

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { removeBroadcastSendJob } from '@/lib/whatsapp/broadcast-queue'
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -47,9 +48,25 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     const params = await context.params
     const id = params.id
 
+    const broadcast = await prisma.waBroadcast.findFirst({
+      where: { id, user_id: userId },
+      select: { status: true },
+    })
+    if (!broadcast) {
+      return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
+    }
+    if (broadcast.status === 'sending') {
+      return NextResponse.json({ error: 'Stop the broadcast before deleting it' }, { status: 409 })
+    }
+
     await prisma.waBroadcast.delete({
       where: { id, user_id: userId }
     })
+
+    // A scheduled broadcast's job would find nothing to send; drop it anyway.
+    if (broadcast.status === 'scheduled') {
+      await removeBroadcastSendJob(id).catch(() => {})
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
