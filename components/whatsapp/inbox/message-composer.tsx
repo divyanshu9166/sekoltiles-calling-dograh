@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useRef, useCallback, KeyboardEvent } from "react";
-import { Send, LayoutTemplate } from "lucide-react";
+import { useState, useRef, useCallback, useEffect, KeyboardEvent, ClipboardEvent } from "react";
+import { Send, LayoutTemplate, Paperclip, X, FileText } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  checkOutboundMedia,
+  formatFileSize,
+  MEDIA_ACCEPT,
+  MEDIA_CAPTION_LIMIT,
+} from "@/lib/whatsapp/outbound-media";
 import { ReplyQuote } from "./reply-quote";
 
 interface ReplyDraft {
@@ -17,6 +24,7 @@ interface MessageComposerProps {
   sessionExpired: boolean;
   loading?: boolean;
   onSend: (text: string, replyToId?: string) => Promise<boolean>;
+  onSendMedia: (file: File, caption: string, replyToId?: string) => Promise<boolean>;
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
@@ -27,14 +35,45 @@ export function MessageComposer({
   sessionExpired,
   loading = false,
   onSend,
+  onSendMedia,
   onOpenTemplates,
   replyTo,
   onClearReply,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [attachmentPreview, setAttachmentPreview] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const sendInFlight = useRef(false);
+
+  // Thumbnail for an attached photo; revoked when it changes or unmounts.
+  useEffect(() => {
+    if (!attachment || !attachment.type.startsWith("image/")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAttachmentPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(attachment);
+    setAttachmentPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment]);
+
+  const attachFile = useCallback((file: File) => {
+    const check = checkOutboundMedia(file);
+    if (!check.ok) {
+      toast.error(check.error);
+      return;
+    }
+    setAttachment(file);
+    textareaRef.current?.focus();
+  }, []);
+
+  const clearAttachment = useCallback(() => {
+    setAttachment(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -46,14 +85,21 @@ export function MessageComposer({
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sendInFlight.current || sessionExpired || loading) return;
+    if ((!trimmed && !attachment) || sendInFlight.current || sessionExpired || loading) return;
+    if (attachment && trimmed.length > MEDIA_CAPTION_LIMIT) {
+      toast.error(`Caption can be at most ${MEDIA_CAPTION_LIMIT} characters`);
+      return;
+    }
 
     sendInFlight.current = true;
     setSending(true);
     try {
-      const accepted = await onSend(trimmed, replyTo?.id);
+      const accepted = attachment
+        ? await onSendMedia(attachment, trimmed, replyTo?.id)
+        : await onSend(trimmed, replyTo?.id);
       if (!accepted) return;
       setText("");
+      clearAttachment();
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -61,7 +107,18 @@ export function MessageComposer({
       sendInFlight.current = false;
       setSending(false);
     }
-  }, [text, sessionExpired, loading, onSend, replyTo?.id]);
+  }, [text, attachment, sessionExpired, loading, onSend, onSendMedia, replyTo?.id, clearAttachment]);
+
+  // Pasting a screenshot or copied photo attaches it.
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const file = Array.from(e.clipboardData.files)[0];
+      if (!file) return;
+      e.preventDefault();
+      attachFile(file);
+    },
+    [attachFile]
+  );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -110,6 +167,40 @@ export function MessageComposer({
         </div>
       )}
 
+      {attachment && (
+        <div className="mb-2 flex items-center gap-3 rounded-xl border border-border bg-surface-light p-2">
+          {attachmentPreview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={attachmentPreview}
+              alt="Attached photo"
+              className="h-14 w-14 shrink-0 rounded-lg object-cover"
+            />
+          ) : (
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-surface">
+              <FileText className="h-6 w-6 text-muted" />
+            </span>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">{attachment.name}</p>
+            <p className="text-xs text-muted">
+              {formatFileSize(attachment.size)} · Add a caption below (optional)
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 shrink-0 p-0 text-muted hover:text-foreground"
+            onClick={clearAttachment}
+            disabled={sending}
+            aria-label="Remove attachment"
+            title="Remove attachment"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       <div className="ui-message-input-row flex items-end gap-2">
         <Button
           variant="ghost"
@@ -122,15 +213,41 @@ export function MessageComposer({
           <LayoutTemplate className="h-4 w-4" />
         </Button>
 
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-9 w-9 shrink-0 p-0 text-muted hover:text-foreground"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={sessionExpired || sending || loading}
+          title="Attach photo or document"
+          aria-label="Attach photo or document"
+        >
+          <Paperclip className="h-4 w-4" />
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={MEDIA_ACCEPT}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) attachFile(file);
+            e.target.value = "";
+          }}
+        />
+
         <textarea
           ref={textareaRef}
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={
             loading ? 'Loading messages…' : sessionExpired
               ? "Session expired - use a template"
-              : "Type a message…"
+              : attachment
+                ? "Add a caption…"
+                : "Type a message…"
           }
           disabled={sessionExpired || sending || loading}
           aria-label="Message text"
@@ -145,7 +262,7 @@ export function MessageComposer({
         <Button
           size="sm"
           className="wa-send-button h-9 w-9 shrink-0 bg-accent p-0 hover:bg-accent disabled:opacity-40"
-          disabled={!text.trim() || sessionExpired || sending || loading}
+          disabled={(!text.trim() && !attachment) || sessionExpired || sending || loading}
           onClick={handleSend}
           aria-label="Send message"
         >
@@ -157,7 +274,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge (w-9 button + gap-2 = 44px). */}
       <p className="mt-1 pl-11 text-[10px] text-muted">
-        Enter to send · Shift+Enter for a new line
+        Enter to send · Shift+Enter for a new line · 📎 photos up to 5 MB, documents up to 25 MB
       </p>
     </div>
   );

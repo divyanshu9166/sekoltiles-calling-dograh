@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday, isValid } from "date-fns";
 import { customerSession, mergeInboxMessages, templatePickerProblem } from "@/lib/whatsapp/inbox-state";
+import { checkOutboundMedia, mediaMessageText } from "@/lib/whatsapp/outbound-media";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -406,6 +407,72 @@ export function MessageThread({
         return true;
       } catch (err) {
         console.error("Failed to send message:", err);
+        const reason = err instanceof Error ? err.message : "network error";
+        toast.error(`Failed to send: ${reason}`);
+        onUpdateMessage(tempId, { status: "failed" });
+        return false;
+      }
+    },
+    [conversation, onNewMessage, onUpdateMessage]
+  );
+
+  const handleSendMedia = useCallback(
+    async (file: File, caption: string, replyToId?: string) => {
+      if (!conversation || customerSession(messagesRef.current).expired) return false;
+      const check = checkOutboundMedia(file);
+      if (!check.ok) {
+        toast.error(check.error);
+        return false;
+      }
+
+      // The bubble previews the local file until the server's proxy URL
+      // replaces it; the blob URL is released once that happens.
+      const tempId = `temp-${crypto.randomUUID()}`;
+      const localUrl = URL.createObjectURL(file);
+      onNewMessage({
+        id: tempId,
+        conversation_id: conversation.id,
+        sender_type: "agent",
+        content_type: check.kind,
+        content_text: mediaMessageText(check.kind, check.filename, caption) ?? undefined,
+        media_url: localUrl,
+        status: "sending",
+        created_at: new Date().toISOString(),
+        reply_to_message_id: replyToId,
+      });
+
+      const form = new FormData();
+      form.append("conversation_id", conversation.id);
+      form.append("file", file, check.filename);
+      if (caption) form.append("caption", caption);
+      if (replyToId) form.append("reply_to_message_id", replyToId);
+
+      try {
+        const res = await fetch("/api/whatsapp/send", { method: "POST", body: form });
+        const payload = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          const reason =
+            res.status === 413
+              ? "file is too large for the server"
+              : payload?.error || `HTTP ${res.status}`;
+          console.error("Failed to send file:", reason);
+          toast.error(`Failed to send: ${reason}`);
+          onUpdateMessage(tempId, { status: "failed" });
+          return false;
+        }
+
+        onUpdateMessage(tempId, {
+          ...(payload?.message_id ? { id: payload.message_id as string } : {}),
+          message_id: payload?.whatsapp_message_id as string | undefined,
+          media_url: (payload?.media_url as string | undefined) ?? localUrl,
+          status: "sent",
+        });
+        if (payload?.media_url) setTimeout(() => URL.revokeObjectURL(localUrl), 60_000);
+        if (activeIdRef.current === conversation.id) setReplyTo(null);
+        return true;
+      } catch (err) {
+        console.error("Failed to send file:", err);
         const reason = err instanceof Error ? err.message : "network error";
         toast.error(`Failed to send: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
@@ -926,6 +993,7 @@ export function MessageThread({
         sessionExpired={sessionInfo.expired}
         loading={loading}
         onSend={handleSend}
+        onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}

@@ -10,7 +10,9 @@
  */
 
 const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+// WHATSAPP_GRAPH_API_BASE is only for pointing local tests at a mock Graph API.
+const META_API_BASE =
+  process.env.WHATSAPP_GRAPH_API_BASE ?? `https://graph.facebook.com/${META_API_VERSION}`
 
 export interface MetaSendResult {
   messageId: string
@@ -370,6 +372,89 @@ export async function downloadMedia(
     response.headers.get('content-type') || 'application/octet-stream'
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
+}
+
+export interface UploadMediaArgs {
+  phoneNumberId: string
+  accessToken: string
+  file: Blob
+  filename: string
+  mimeType: string
+}
+
+/**
+ * Upload a file to Meta so it can be sent by ID. Meta keeps uploaded media
+ * for 30 days, and the same ID works with getMediaUrl for the inbox preview.
+ *
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media
+ */
+export async function uploadMedia(args: UploadMediaArgs): Promise<{ mediaId: string }> {
+  const { phoneNumberId, accessToken, file, filename, mimeType } = args
+  const form = new FormData()
+  form.append('messaging_product', 'whatsapp')
+  form.append('type', mimeType)
+  form.append('file', new Blob([await file.arrayBuffer()], { type: mimeType }), filename)
+
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/media`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Media upload failed: ${response.status}`)
+  }
+  const data = await response.json()
+  if (!data.id) throw new Error('Media ID not found in Meta response')
+  return { mediaId: String(data.id) }
+}
+
+export interface SendMediaMessageArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  kind: 'image' | 'document'
+  mediaId: string
+  caption?: string
+  /** Shown to the customer as the document's name. */
+  filename?: string
+  contextMessageId?: string
+}
+
+/**
+ * Send an uploaded image or document. Like text, free-form media only works
+ * inside the 24-hour customer service window.
+ */
+export async function sendMediaMessage(args: SendMediaMessageArgs): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, kind, mediaId, caption, filename, contextMessageId } = args
+
+  const media: Record<string, string> = { id: mediaId }
+  if (caption) media.caption = caption
+  if (kind === 'document' && filename) media.filename = filename
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: kind,
+    [kind]: media,
+  }
+  if (contextMessageId) {
+    body.context = { message_id: contextMessageId }
+  }
+
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
 }
 
 // ============================================================
