@@ -12,8 +12,12 @@ import {
   MapPin,
   LayoutTemplate,
   ImageOff,
+  Download,
+  ExternalLink,
+  X,
 } from "lucide-react";
 import { format, isValid } from "date-fns";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { MessageReactions } from "./message-reactions";
 import { ReplyQuote } from "./reply-quote";
 
@@ -55,6 +59,8 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [mimeType, setMimeType] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,6 +69,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
       setLoading(true);
       setError(false);
       setSrc(null);
+      setMimeType(null);
       try {
         let nextSrc = url;
         if (url.startsWith('/api/whatsapp/media/')) {
@@ -70,6 +77,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
           if (!res.ok) throw new Error('Failed to load media');
           const blob = await res.blob();
           if (controller.signal.aborted) return;
+          setMimeType(blob.type || null);
           blobUrl = URL.createObjectURL(blob);
           nextSrc = blobUrl;
         }
@@ -104,12 +112,91 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setViewerOpen(true)}
+        className="block cursor-zoom-in rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        aria-label="Open image"
+        title="Click to view full size"
+      >
+        <img
+          src={src ?? ""}
+          alt={alt}
+          className="max-h-64 max-w-60 rounded-lg object-cover"
+          onError={() => setError(true)}
+        />
+      </button>
+      {src && (
+        <ImageViewer
+          open={viewerOpen}
+          onOpenChange={setViewerOpen}
+          src={src}
+          alt={alt}
+          mimeType={mimeType}
+        />
+      )}
+    </>
+  );
+}
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+};
+
+// Full-screen view of a chat image, with download and open-in-new-tab.
+function ImageViewer({
+  open,
+  onOpenChange,
+  src,
+  alt,
+  mimeType,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  src: string;
+  alt: string;
+  mimeType: string | null;
+}) {
+  const extension = (mimeType && IMAGE_EXTENSIONS[mimeType]) || "jpg";
+  const toolbarButton =
+    "inline-flex h-9 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-sm font-medium text-white transition-colors hover:bg-white/20";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="flex max-h-[95dvh] w-auto max-w-[95vw] flex-col gap-3 bg-black/90 p-3 ring-0 sm:max-w-[95vw]"
+      >
+        <DialogTitle className="sr-only">{alt}</DialogTitle>
+        <div className="flex items-center justify-end gap-2">
+          <a href={src} download={`whatsapp-image.${extension}`} className={toolbarButton}>
+            <Download className="h-4 w-4" />
+            Download
+          </a>
+          <a href={src} target="_blank" rel="noopener noreferrer" className={toolbarButton}>
+            <ExternalLink className="h-4 w-4" />
+            <span className="hidden sm:inline">Open in new tab</span>
+          </a>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className={toolbarButton}
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <img
+          src={src}
+          alt={alt}
+          className="mx-auto max-h-[calc(95dvh-5rem)] max-w-full rounded-lg object-contain"
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
 
