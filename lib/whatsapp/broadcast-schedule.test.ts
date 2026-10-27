@@ -34,6 +34,13 @@ describe('parseScheduledAt', () => {
     expect(parseScheduledAt('2026-10-27T12:00:00.000Z', now)).toEqual({ scheduledAt: new Date('2026-10-27T12:00:00.000Z') })
   })
 
+  it('limits media-header broadcasts to 29 days, before Meta deletes the file', () => {
+    const inDays = (d: number) => new Date(now + d * 24 * 60 * 60 * 1000).toISOString()
+    expect(parseScheduledAt(inDays(40), now)).toHaveProperty('scheduledAt')
+    expect(parseScheduledAt(inDays(40), now, { hasHeaderMedia: true })).toHaveProperty('error')
+    expect(parseScheduledAt(inDays(20), now, { hasHeaderMedia: true })).toHaveProperty('scheduledAt')
+  })
+
   it('rejects past, too-soon, too-far and invalid values', () => {
     expect(parseScheduledAt('2026-10-27T09:00:00.000Z', now)).toHaveProperty('error')
     expect(parseScheduledAt('2026-10-27T10:00:30.000Z', now)).toHaveProperty('error')

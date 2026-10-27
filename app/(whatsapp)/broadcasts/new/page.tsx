@@ -227,6 +227,7 @@ export default function NewBroadcastPage() {
               onSaveDraft={handleSaveDraft}
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
+              hasHeaderMedia={!!headerUpload.media}
             />
           )}
         </div>

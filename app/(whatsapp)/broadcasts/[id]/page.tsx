@@ -113,6 +113,7 @@ function FunnelChart({ steps }: { steps: FunnelStep[] }) {
 
 const RECIPIENT_STATUSES: readonly RecipientStatus[] = [
   'pending',
+  'sending',
   'sent',
   'delivered',
   'read',
@@ -302,7 +303,7 @@ export default function BroadcastDetailPage() {
 
   const status = getBroadcastStatus(broadcast.status);
   const progressTotal = Object.values(counts).reduce((sum, n) => sum + n, 0);
-  const progressDone = progressTotal - (counts.pending ?? 0);
+  const progressDone = progressTotal - (counts.pending ?? 0) - (counts.sending ?? 0);
   const skippedCount = counts.skipped ?? 0;
 
   const funnelSteps: FunnelStep[] = [

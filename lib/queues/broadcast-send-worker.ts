@@ -7,16 +7,21 @@
  */
 
 import type { Job } from 'bullmq'
-import { createBroadcastSendWorker, type BroadcastSendJobData } from './jobs'
+import {
+  createBroadcastSendQueueEvents,
+  createBroadcastSendWorker,
+  type BroadcastSendJobData,
+} from './jobs'
 import { prisma } from '@/lib/db'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import {
   BroadcastRetryLaterError,
   DEFAULT_RATE_PER_SECOND,
+  INTERRUPTED_REASON,
   processBroadcast,
 } from '@/lib/whatsapp/broadcast-sender'
 import { prismaBroadcastStore } from '@/lib/whatsapp/broadcast-store'
-import { enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'
+import { broadcastJobId, enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'
 
 let workerStarted = false
 
@@ -44,10 +49,11 @@ export async function runBroadcastSendJob(job: Job<BroadcastSendJobData>) {
 }
 
 /** After the last retry, stop the broadcast instead of leaving it on "sending". */
-async function giveUp(broadcastId: string, err: Error) {
-  const reason = `Sending stopped after repeated errors: ${err.message}`
+async function giveUp(broadcastId: string, message: string) {
+  const reason = `Sending stopped after repeated errors: ${message}`
   try {
-    await prismaBroadcastStore.failAllPending(broadcastId, reason)
+    await prismaBroadcastStore.failInFlight(broadcastId, INTERRUPTED_REASON)
+    await prismaBroadcastStore.closePending(broadcastId, 'failed', reason)
     await prismaBroadcastStore.refreshStats(broadcastId)
     await prismaBroadcastStore.finish(broadcastId, 'failed', reason)
   } catch (finalErr) {
@@ -84,11 +90,26 @@ export function startBroadcastSendWorker() {
     } else {
       console.error(`[broadcast-worker] job ${job.id} failed (attempt ${job.attemptsMade}/${attempts}):`, err.message)
     }
-    if (job.attemptsMade >= attempts) void giveUp(job.data.broadcastId, err)
+    if (job.attemptsMade >= attempts) void giveUp(job.data.broadcastId, err.message)
   })
 
   worker.on('error', (err) => {
     console.error('[broadcast-worker] error:', err.message)
+  })
+
+  // A job that stalls more than maxStalledCount times (its worker kept
+  // dying or blocking) is failed inside Redis, and no Worker 'failed' event
+  // fires for it. Without this the broadcast would sit on "sending".
+  const queueEvents = createBroadcastSendQueueEvents()
+  const jobIdPrefix = broadcastJobId('')
+  queueEvents.on('failed', ({ jobId, failedReason }) => {
+    if (!/stalled more than allowable limit/i.test(failedReason ?? '') || !jobId.startsWith(jobIdPrefix)) return
+    const broadcastId = jobId.slice(jobIdPrefix.length)
+    console.error(`[broadcast-worker] ${broadcastId}: job stalled too many times; stopping the broadcast`)
+    void giveUp(broadcastId, 'the sending job kept stalling')
+  })
+  queueEvents.on('error', (err) => {
+    console.error('[broadcast-worker] queue events error:', err.message)
   })
 
   void requeueOrphanedBroadcasts().catch((err) => {

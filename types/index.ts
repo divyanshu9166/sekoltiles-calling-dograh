@@ -184,8 +184,11 @@ export interface Deal {
 }
 
 export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'cancelled';
-/** `skipped`: not sent because the contact opted out or the broadcast was cancelled. */
-export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
+/**
+ * `sending`: claimed by the broadcast worker, request to Meta in progress.
+ * `skipped`: not sent because the contact opted out or the broadcast was cancelled.
+ */
+export type RecipientStatus = 'pending' | 'sending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
 
 export interface Broadcast {
   id: string;

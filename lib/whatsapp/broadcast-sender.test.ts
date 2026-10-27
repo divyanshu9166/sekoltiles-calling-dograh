@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { MetaApiError, type SendTemplateMessageArgs } from '@/lib/whatsapp/meta-api'
 import {
   BroadcastRetryLaterError,
+  INTERRUPTED_REASON,
+  MISSED_SCHEDULE_REASON,
   OPTED_OUT_REASON,
   NO_SENDER_REASON,
+  UNKNOWN_OUTCOME_REASON,
   classifySendError,
   processBroadcast,
   type BroadcastRecord,
@@ -38,6 +41,7 @@ function makeStore(opts: {
     template_language: 'en',
     template_variables: { '1': { type: 'field', value: 'name' }, '2': { type: 'static', value: '20%' } },
     header_media: null,
+    scheduled_at: null,
     ...opts.broadcast,
   }
   const recipients: FakeRecipient[] = opts.recipients.map((r) => ({
@@ -77,11 +81,14 @@ function makeStore(opts: {
     async getTemplateBody() {
       return opts.templateBody === undefined ? 'Hi {{1}}, get {{2}} off' : opts.templateBody
     },
-    async listPendingRecipients(_b, limit, exclude) {
-      return recipients
-        .filter((r) => r.status === 'pending' && !exclude.includes(r.id))
-        .slice(0, limit)
-        .map((r) => ({ id: r.id, contact: r.contact, customValues: r.customValues }))
+    async claimNextRecipient(_b, exclude) {
+      const r = recipients.find((x) => x.status === 'pending' && !exclude.includes(x.id))
+      if (!r) return null
+      r.status = 'sending'
+      return { id: r.id, contact: r.contact, customValues: r.customValues }
+    },
+    async releaseRecipient(id) {
+      if (byId(id).status === 'sending') byId(id).status = 'pending'
     },
     async markSent(id, messageId) {
       Object.assign(byId(id), { status: 'sent', messageId, error: null })
@@ -89,8 +96,11 @@ function makeStore(opts: {
     async markUnsent(id, status, error) {
       Object.assign(byId(id), { status, error })
     },
-    async failAllPending(_b, error) {
-      for (const r of recipients) if (r.status === 'pending') Object.assign(r, { status: 'failed', error })
+    async closePending(_b, status, error) {
+      for (const r of recipients) if (r.status === 'pending') Object.assign(r, { status, error })
+    },
+    async failInFlight(_b, error) {
+      for (const r of recipients) if (r.status === 'sending') Object.assign(r, { status: 'failed', error })
     },
     async refreshStats() {
       return {
@@ -309,7 +319,7 @@ describe('processBroadcast', () => {
       if (n === 2) state.broadcast.status = 'cancelled'
     }
     const { send, calls } = makeSender()
-    const result = await processBroadcast('b1', { store, send, ...fakeClock(), batchSize: 2 }, { finalAttempt: false })
+    const result = await processBroadcast('b1', { store, send, ...fakeClock(), statusCheckEvery: 2 }, { finalAttempt: false })
     expect(result.outcome).toBe('cancelled')
     expect(calls).toHaveLength(2)
     expect(state.finished).toBeNull()
@@ -369,12 +379,133 @@ describe('processBroadcast', () => {
   })
 })
 
+describe('processBroadcast: no duplicate sends', () => {
+  it('never sends to the same recipient twice when two runs of the job overlap', async () => {
+    const { store, state } = makeStore({
+      recipients: Array.from({ length: 6 }, (_, i) => ({ id: `r${i}`, contact: contact(`c${i}`, `91987654321${i}`) })),
+    })
+    const calls: string[] = []
+    const send = async (args: SendTemplateMessageArgs) => {
+      calls.push(args.to)
+      await new Promise((r) => setTimeout(r, 1))
+      return { messageId: `wamid.${calls.length}` }
+    }
+    const deps = { store, send, sleep: async () => {} }
+    await Promise.all([
+      processBroadcast('b1', deps, { finalAttempt: false }),
+      processBroadcast('b1', deps, { finalAttempt: false }),
+    ])
+    expect([...calls].sort()).toEqual(state.recipients.map((_, i) => `91987654321${i}`))
+    expect(state.recipients.every((r) => r.status === 'sent')).toBe(true)
+  })
+
+  it('fails a recipient a crashed run left mid-send instead of sending again', async () => {
+    const { store, state } = makeStore({
+      recipients: [
+        { id: 'r1', contact: contact('c1', '919876543210') },
+        { id: 'r2', contact: contact('c2', '919876543211') },
+      ],
+    })
+    state.recipients[0].status = 'sending'
+    const { send, calls } = makeSender()
+    await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(calls.map((c) => c.to)).toEqual(['919876543211'])
+    expect(state.recipients[0]).toMatchObject({ status: 'failed', error: INTERRUPTED_REASON })
+  })
+
+  it('does not retry when the connection broke after the request may have reached Meta', async () => {
+    const { store, state } = makeStore({ recipients: [{ id: 'r1', contact: contact('c1', '919876543210') }] })
+    const reset = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+    const { send, calls } = makeSender(() => reset)
+    await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(calls).toHaveLength(1)
+    expect(state.recipients[0]).toMatchObject({ status: 'failed', error: UNKNOWN_OUTCOME_REASON })
+  })
+
+  it('retries when the connection was refused before anything was sent', async () => {
+    const { store, state } = makeStore({ recipients: [{ id: 'r1', contact: contact('c1', '919876543210') }] })
+    const refused = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } })
+    const { send, calls } = makeSender((_a, n) => (n === 1 ? refused : null))
+    await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(calls).toHaveLength(2)
+    expect(state.recipients[0].status).toBe('sent')
+  })
+})
+
+describe('processBroadcast: schedule', () => {
+  const HOUR = 60 * 60 * 1000
+
+  it('fails a scheduled broadcast that runs more than two hours late instead of sending it', async () => {
+    const { store, state } = makeStore({
+      broadcast: { status: 'scheduled', scheduled_at: new Date(-3 * HOUR) },
+      recipients: [{ id: 'r1', contact: contact('c1', '919876543210') }],
+    })
+    const { send, calls } = makeSender()
+    const result = await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(result.outcome).toBe('missed')
+    expect(calls).toHaveLength(0)
+    expect(state.recipients[0]).toMatchObject({ status: 'skipped', error: MISSED_SCHEDULE_REASON })
+    expect(state.finished).toEqual({ status: 'failed', error: MISSED_SCHEDULE_REASON })
+  })
+
+  it('still sends a scheduled broadcast that is only a little late', async () => {
+    const { store, state } = makeStore({
+      broadcast: { status: 'scheduled', scheduled_at: new Date(-HOUR) },
+      recipients: [{ id: 'r1', contact: contact('c1', '919876543210') }],
+    })
+    const { send } = makeSender()
+    await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(state.finished?.status).toBe('sent')
+  })
+})
+
+describe('processBroadcast: template-wide errors', () => {
+  it('stops on a template parameter mismatch instead of failing everyone one by one', async () => {
+    const { store, state } = makeStore({
+      recipients: [
+        { id: 'r1', contact: contact('c1', '919876543210') },
+        { id: 'r2', contact: contact('c2', '919876543211') },
+      ],
+    })
+    const { send, calls } = makeSender(() => metaError(132000, 'Number of parameters does not match'))
+    const result = await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(result.outcome).toBe('stopped')
+    expect(calls).toHaveLength(1)
+    expect(state.recipients.map((r) => r.status)).toEqual(['failed', 'failed'])
+  })
+
+  it('keeps a missing variable (131008) to that one contact', async () => {
+    const { store, state } = makeStore({
+      recipients: [
+        { id: 'r1', contact: contact('c1', '919876543210') },
+        { id: 'r2', contact: contact('c2', '919876543211') },
+      ],
+    })
+    const { send } = makeSender((a) => (a.to === '919876543210' ? metaError(131008, 'Required parameter is missing') : null))
+    await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(state.recipients.map((r) => r.status)).toEqual(['failed', 'sent'])
+  })
+})
+
 describe('classifySendError', () => {
-  it('retries rate limits, Meta outages and network failures', () => {
+  it('retries rate limits, Meta-side errors and refused connections', () => {
     expect(classifySendError(metaError(130429))).toBe('retry')
     expect(classifySendError(metaError(131056))).toBe('retry')
-    expect(classifySendError(new MetaApiError('Service unavailable', 503))).toBe('retry')
-    expect(classifySendError(new TypeError('fetch failed'))).toBe('retry')
+    for (const code of [4, 80007]) expect(classifySendError(metaError(code))).toBe('retry')
+    expect(classifySendError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'EAI_AGAIN' } }))).toBe('retry')
+    expect(classifySendError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }))).toBe('retry')
+  })
+
+  it('treats failures that may have reached Meta as unknown, never retried', () => {
+    expect(classifySendError(new MetaApiError('Bad gateway', 502))).toBe('unknown')
+    expect(classifySendError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_SOCKET' } }))).toBe('unknown')
+    expect(classifySendError(new TypeError('fetch failed'))).toBe('unknown')
+    expect(classifySendError(new TypeError('Cannot read properties of undefined'))).toBe('unknown')
+  })
+
+  it('stops on template-wide errors and keeps variable errors per contact', () => {
+    for (const code of [131048, 131053, 132000, 132005, 132007, 132012]) expect(classifySendError(metaError(code))).toBe('stop')
+    for (const code of [131008, 131009]) expect(classifySendError(metaError(code))).toBe('recipient')
   })
 
   it('reads the code from the message when there is no MetaApiError', () => {

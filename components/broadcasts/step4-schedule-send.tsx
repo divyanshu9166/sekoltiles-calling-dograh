@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { ArrowLeft, Send, Loader2, Users, Save, CalendarClock } from 'lucide-react';
 import { dateToIstInput, formatIst, istInputToDate } from '@/lib/whatsapp/ist-time';
+import { scheduleTooFarError } from '@/lib/whatsapp/broadcast-schedule';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
 type CustomFieldOperator = 'is' | 'is_not' | 'contains';
@@ -44,6 +45,8 @@ interface Step4Props {
   onSaveDraft?: () => void;
   onBack: () => void;
   isProcessing: boolean;
+  /** The template's header photo/video/PDF is attached (limits how far ahead it can be scheduled). */
+  hasHeaderMedia?: boolean;
 }
 
 /** One hour from now, rounded up to the next quarter hour, in IST. */
@@ -61,6 +64,7 @@ export function Step4ScheduleSend({
   onSaveDraft,
   onBack,
   isProcessing,
+  hasHeaderMedia = false,
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [when, setWhen] = useState<'now' | 'later'>('now');
@@ -79,7 +83,7 @@ export function Step4ScheduleSend({
         ? 'Pick a date and time.'
         : scheduledAt.getTime() < nowMs + 60_000
           ? 'Pick a time at least a minute from now.'
-          : null;
+          : scheduleTooFarError(scheduledAt.getTime(), nowMs, hasHeaderMedia);
   const canSend = !!name.trim() && !isProcessing && !scheduleError;
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [optedOutCount, setOptedOutCount] = useState(0);

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import { enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'
 import { parseScheduledAt } from '@/lib/whatsapp/broadcast-schedule'
@@ -10,6 +11,9 @@ export async function POST(request: Request) {
     const session = await getSession()
     if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const userId = String(session.id)
+
+    const limit = checkRateLimit(`broadcast:${userId}`, RATE_LIMITS.broadcast)
+    if (!limit.success) return rateLimitResponse(limit)
 
     const payload = await request.json()
     const { name, template, audience, variables } = payload
@@ -25,7 +29,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
     }
 
-    const schedule = parseScheduledAt(payload.scheduled_at)
+    const schedule = parseScheduledAt(payload.scheduled_at, Date.now(), { hasHeaderMedia: !!headerMedia })
     if ('error' in schedule) {
       return NextResponse.json({ error: schedule.error }, { status: 400 })
     }

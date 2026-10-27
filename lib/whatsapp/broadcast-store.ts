@@ -17,6 +17,7 @@ export const prismaBroadcastStore: BroadcastStore = {
         template_language: true,
         template_variables: true,
         header_media: true,
+        scheduled_at: true,
       },
     })
   },
@@ -48,17 +49,28 @@ export const prismaBroadcastStore: BroadcastStore = {
     return template?.body_text ?? null
   },
 
-  async listPendingRecipients(broadcastId, limit, excludeIds) {
-    const rows = await prisma.waBroadcastRecipient.findMany({
-      where: {
-        broadcast_id: broadcastId,
-        status: 'pending',
-        ...(excludeIds.length ? { id: { notIn: excludeIds } } : {}),
-      },
-      orderBy: { id: 'asc' },
-      take: limit,
+  async claimNextRecipient(broadcastId, excludeIds) {
+    // SKIP LOCKED + the status flip in one statement: two runs of the same
+    // job can never claim the same recipient.
+    const claimed = await prisma.$queryRaw<{ id: string }[]>`
+      UPDATE "broadcast_recipients" SET "status" = 'sending'
+      WHERE "id" = (
+        SELECT "id" FROM "broadcast_recipients"
+        WHERE "broadcast_id" = ${broadcastId}
+          AND "status" = 'pending'
+          AND NOT ("id" = ANY(${excludeIds}::text[]))
+        ORDER BY "id"
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      AND "status" = 'pending'
+      RETURNING "id"`
+    const id = claimed[0]?.id
+    if (!id) return null
+
+    const row = await prisma.waBroadcastRecipient.findUnique({
+      where: { id },
       select: {
-        id: true,
         contact: {
           select: {
             id: true,
@@ -72,7 +84,8 @@ export const prismaBroadcastStore: BroadcastStore = {
         },
       },
     })
-    return rows.map(({ id, contact }) => ({
+    const contact = row?.contact ?? null
+    return {
       id,
       contact: contact
         ? {
@@ -87,7 +100,14 @@ export const prismaBroadcastStore: BroadcastStore = {
       customValues: Object.fromEntries(
         (contact?.contact_custom_values ?? []).map((v) => [v.custom_field_id, v.value ?? '']),
       ),
-    }))
+    }
+  },
+
+  async releaseRecipient(recipientId) {
+    await prisma.waBroadcastRecipient.updateMany({
+      where: { id: recipientId, status: 'sending' },
+      data: { status: 'pending' },
+    })
   },
 
   async markSent(recipientId, whatsappMessageId) {
@@ -104,9 +124,16 @@ export const prismaBroadcastStore: BroadcastStore = {
     })
   },
 
-  async failAllPending(broadcastId, error) {
+  async closePending(broadcastId, status, error) {
     await prisma.waBroadcastRecipient.updateMany({
       where: { broadcast_id: broadcastId, status: 'pending' },
+      data: { status, error_message: error },
+    })
+  },
+
+  async failInFlight(broadcastId, error) {
+    await prisma.waBroadcastRecipient.updateMany({
+      where: { broadcast_id: broadcastId, status: 'sending' },
       data: { status: 'failed', error_message: error },
     })
   },

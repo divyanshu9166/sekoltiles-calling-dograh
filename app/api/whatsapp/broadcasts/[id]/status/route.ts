@@ -3,7 +3,9 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { recalculateBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
 
-const BROADCAST_STATUSES = new Set(['draft', 'scheduled', 'sending', 'sent', 'failed'])
+// Scheduling and sending belong to /broadcasts/create and the queue worker,
+// stopping to /broadcasts/[id]/cancel; this route can't start or stop either.
+const BROADCAST_STATUSES = new Set(['draft', 'sent', 'failed'])
 
 export async function POST(
   request: Request,
@@ -27,6 +29,9 @@ export async function POST(
 
     if (!broadcast) {
       return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
+    }
+    if (broadcast.status === 'scheduled' || broadcast.status === 'sending') {
+      return NextResponse.json({ error: 'Cancel the broadcast instead' }, { status: 409 })
     }
 
     await prisma.waBroadcast.update({

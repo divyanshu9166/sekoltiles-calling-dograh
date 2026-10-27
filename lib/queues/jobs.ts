@@ -16,7 +16,7 @@
  * (Node.js server — not the edge runtime or the browser).
  */
 
-import { Queue, Worker, type Job } from 'bullmq'
+import { Queue, QueueEvents, Worker, type Job } from 'bullmq'
 import type { RedisOptions } from 'ioredis'
 
 // BullMQ manages its own internal Redis connections using these options.
@@ -260,6 +260,11 @@ export function getBroadcastSendQueue() {
     })
   }
   return _broadcastSendQueue
+}
+
+/** Queue-wide events; needed to see jobs BullMQ fails itself (stalled too often). */
+export function createBroadcastSendQueueEvents(): QueueEvents {
+  return new QueueEvents(QUEUE_BROADCAST_SEND, { connection })
 }
 
 export function createBroadcastSendWorker(
