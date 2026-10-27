@@ -281,6 +281,11 @@ function MessageContent({ message }: { message: Message }) {
             <LayoutTemplate className="h-3 w-3" />
             Template
           </span>
+          {message.media_url && (
+            <div className="mt-1">
+              <MediaImage url={message.media_url} alt="Template header" />
+            </div>
+          )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {message.content_text}
@@ -289,13 +294,28 @@ function MessageContent({ message }: { message: Message }) {
         </div>
       );
 
-    case "location":
-      return (
-        <div className="flex items-center gap-2 text-sm">
+    case "location": {
+      // Inbound locations are stored as "name - address - lat,long".
+      const coords = message.content_text?.match(/(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)\s*$/);
+      const label = (
+        <>
           <MapPin className="h-4 w-4 shrink-0 text-muted" />
           <span>{message.content_text || "Location shared"}</span>
-        </div>
+        </>
       );
+      return coords ? (
+        <a
+          href={`https://www.google.com/maps?q=${coords[1]},${coords[2]}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-2 text-sm underline-offset-2 hover:underline"
+        >
+          {label}
+        </a>
+      ) : (
+        <div className="flex items-center gap-2 text-sm">{label}</div>
+      );
+    }
 
     default:
       return (
@@ -347,6 +367,11 @@ export function MessageBubble({
           {isAgent && message.status === 'failed' && <span className="text-[11px]">Not sent</span>}
         </div>
       </div>
+      {isAgent && message.status === 'failed' && message.error_message && (
+        <p role="alert" className="mt-1 max-w-[18rem] text-right text-[11px] text-red-400">
+          {message.error_message}
+        </p>
+      )}
       {reactions && reactions.length > 0 && onToggleReaction && (
         <MessageReactions
           reactions={reactions}

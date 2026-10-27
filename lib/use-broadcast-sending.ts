@@ -30,6 +30,8 @@ interface BroadcastPayload {
   template: MessageTemplate;
   audience: AudienceConfig;
   variables: Record<string, VariableMapping>;
+  /** Uploaded photo/video/PDF for a template with a media header. */
+  headerMedia?: { type: 'image' | 'video' | 'document'; id: string; filename?: string };
 }
 
 interface UseBroadcastSendingReturn {
@@ -145,6 +147,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
               })),
               template_name: payload.template.name,
               template_language: payload.template.language ?? 'en_US',
+              ...(payload.headerMedia ? { header_media: payload.headerMedia } : {}),
             }),
           });
 

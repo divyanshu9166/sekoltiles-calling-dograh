@@ -288,6 +288,8 @@ model WaContact {
   email      String?
   company    String?
   avatar_url String?
+  /// Set when the customer opts out of marketing (STOP reply or Meta error 131050); broadcasts skip them.
+  opted_out_at DateTime?
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -413,6 +415,8 @@ model WaMessage {
   template_name       String?
   message_id          String?
   status              String   @default("sent")
+  /// Meta's reason when an outgoing message fails to deliver.
+  error_message       String?
   created_at          DateTime @default(now())
   reply_to_message_id String?
 
@@ -457,6 +461,8 @@ model WaMessageTemplate {
   footer_text    String?
   buttons        Json?
   status         String   @default("Draft")
+  /// Meta's reason for a rejected, paused or disabled template.
+  status_reason  String?
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 

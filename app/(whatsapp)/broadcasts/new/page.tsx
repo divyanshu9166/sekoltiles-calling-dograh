@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { MessageTemplate } from '@/types';
@@ -9,6 +9,7 @@ import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audien
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/lib/use-broadcast-sending';
+import { useTemplateHeaderUpload } from '@/lib/whatsapp/use-template-header-upload';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Check } from 'lucide-react';
 
@@ -41,6 +42,13 @@ export default function NewBroadcastPage() {
     Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
   >({});
   const [name, setName] = useState('');
+  const headerUpload = useTemplateHeaderUpload();
+  const resetHeaderUpload = headerUpload.reset;
+
+  // A header file belongs to the template it was chosen for.
+  useEffect(() => {
+    resetHeaderUpload();
+  }, [template?.id, resetHeaderUpload]);
 
   async function handleSend() {
     if (!template) return;
@@ -58,6 +66,9 @@ export default function NewBroadcastPage() {
           excludeTagIds: audience.excludeTagIds,
         },
         variables,
+        headerMedia: headerUpload.media
+          ? { type: headerUpload.media.type, id: headerUpload.media.id, filename: headerUpload.media.filename }
+          : undefined,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -199,6 +210,7 @@ export default function NewBroadcastPage() {
               template={template}
               variables={variables}
               onUpdate={setVariables}
+              headerUpload={headerUpload}
               onNext={() => setCurrentStep(3)}
               onBack={() => setCurrentStep(1)}
             />

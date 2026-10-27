@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
+import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import { appendLog } from '@/lib/whatsapp/api-logger'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -92,7 +93,15 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      header_media,
     } = body
+
+    // Photo/video/PDF for a template with a media header, uploaded once
+    // through /api/whatsapp/media/upload and reused for every recipient.
+    const headerMedia = parseHeaderMedia(header_media)
+    if (header_media && !headerMedia) {
+      return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
+    }
 
     // Normalize to a list of {phone, params} regardless of shape.
     let recipients: NewRecipient[]
@@ -168,7 +177,9 @@ export async function POST(request: Request) {
             to: variant,
             templateName: template_name,
             language: template_language || 'en_US',
-            params: recipient.params ?? [],
+            ...(headerMedia
+              ? { componentParams: { body: recipient.params ?? [], headerMedia } }
+              : { params: recipient.params ?? [] }),
           })
           sentMessageId = result.messageId
           lastError = null

@@ -50,7 +50,8 @@ test('future timestamp clock skew does not extend session beyond 24 hours', () =
 test('template picker refuses unresolved header/media/named/noncontiguous variables', () => {
  const t: MessageTemplate={id:'t',user_id:'u',name:'t',body_text:'Hello {{ 1 }}, {{2}} and {{1}}',category:'Utility',created_at:''}
  assert.equal(templatePickerProblem(t),null)
- for(const overrides of [{header_type:'image' as const},{header_type:'text' as const,header_content:'{{1}}'},{body_text:'{{2}}'},{body_text:'{{name}}'},{buttons:[{type:'URL',url:'https://example.com/{{1}}'}]}])assert.ok(templatePickerProblem({...t,...overrides}))
+ assert.equal(templatePickerProblem({...t,header_type:'image'}),null)
+ for(const overrides of [{header_type:'text' as const,header_content:'{{1}}'},{body_text:'{{2}}'},{body_text:'{{name}}'},{buttons:[{type:'URL',url:'https://example.com/{{1}}'}]}])assert.ok(templatePickerProblem({...t,...overrides}))
 })
 test('actual outgoing bubble has semantic contrast classes, no nested percentage width', () => {
  const html=renderBubble({message:message('out')})

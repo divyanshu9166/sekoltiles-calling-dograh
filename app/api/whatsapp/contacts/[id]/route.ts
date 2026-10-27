@@ -85,6 +85,7 @@ export async function PUT(
             email?: string
             company?: string
             tag_ids?: string[]
+            opted_out?: boolean
         }
 
         try {
@@ -120,6 +121,9 @@ export async function PUT(
         }
         if (body?.company !== undefined) {
             updates.company = String(body.company ?? '').trim() || null
+        }
+        if (typeof body?.opted_out === 'boolean') {
+            updates.opted_out_at = body.opted_out ? new Date() : null
         }
 
         await prisma.$transaction(async (tx) => {

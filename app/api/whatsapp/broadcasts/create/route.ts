@@ -88,8 +88,20 @@ export async function POST(request: Request) {
 
     contacts = [...new Map(contacts.map((contact) => [contact.id, contact])).values()]
 
+    // Never send marketing to customers who opted out (STOP reply or
+    // WhatsApp's own "stop promotions" button).
+    const optedOutCount = contacts.filter((c) => c.opted_out_at).length
+    contacts = contacts.filter((c) => !c.opted_out_at)
+
     if (contacts.length === 0) {
-      return NextResponse.json({ error: 'No contacts found for this audience.' }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: optedOutCount
+            ? 'Everyone in this audience has opted out of marketing messages.'
+            : 'No contacts found for this audience.',
+        },
+        { status: 400 },
+      )
     }
 
     const broadcast = await prisma.waBroadcast.create({
@@ -146,7 +158,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       broadcastId: broadcast.id,
-      recipients: recipientsWithData
+      recipients: recipientsWithData,
+      skippedOptedOut: optedOutCount,
     })
   } catch (error) {
     console.error('Error creating broadcast:', error)

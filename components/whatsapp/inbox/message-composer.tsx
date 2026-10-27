@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, KeyboardEvent, ClipboardEvent } from "react";
-import { Send, LayoutTemplate, Paperclip, X, FileText } from "lucide-react";
+import { Send, LayoutTemplate, Paperclip, X, FileText, Film, Music } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -47,6 +47,24 @@ export function MessageComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sendInFlight = useRef(false);
+  const lastTypingAt = useRef(0);
+  // Classified by extension like the send API; browsers often leave file.type blank.
+  const attachmentCheck = attachment ? checkOutboundMedia(attachment) : null;
+  const attachmentKind = attachmentCheck?.ok ? attachmentCheck.kind : null;
+  const isAudio = attachmentKind === "audio";
+
+  // A new chat starts without a typing indicator shown.
+  useEffect(() => {
+    lastTypingAt.current = 0;
+  }, [conversationId]);
+
+  // WhatsApp shows "typing…" for up to 25 s, so refresh it every 20 s while
+  // the agent keeps typing. Best effort: failures are ignored.
+  const signalTyping = useCallback(() => {
+    if (sessionExpired || Date.now() - lastTypingAt.current < 20_000) return;
+    lastTypingAt.current = Date.now();
+    fetch(`/api/whatsapp/conversations/${conversationId}/typing`, { method: "POST" }).catch(() => {});
+  }, [conversationId, sessionExpired]);
 
   // Thumbnail for an attached photo; revoked when it changes or unmounts.
   useEffect(() => {
@@ -90,6 +108,10 @@ export function MessageComposer({
       toast.error(`Caption can be at most ${MEDIA_CAPTION_LIMIT} characters`);
       return;
     }
+    if (isAudio && trimmed) {
+      toast.error("WhatsApp sends audio without a caption. Remove the text or send it separately.");
+      return;
+    }
 
     sendInFlight.current = true;
     setSending(true);
@@ -100,6 +122,7 @@ export function MessageComposer({
       if (!accepted) return;
       setText("");
       clearAttachment();
+      lastTypingAt.current = 0;
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
@@ -107,7 +130,7 @@ export function MessageComposer({
       sendInFlight.current = false;
       setSending(false);
     }
-  }, [text, attachment, sessionExpired, loading, onSend, onSendMedia, replyTo?.id, clearAttachment]);
+  }, [text, attachment, isAudio, sessionExpired, loading, onSend, onSendMedia, replyTo?.id, clearAttachment]);
 
   // Pasting a screenshot or copied photo attaches it.
   const handlePaste = useCallback(
@@ -134,8 +157,9 @@ export function MessageComposer({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setText(e.target.value);
       adjustHeight();
+      if (e.target.value.trim()) signalTyping();
     },
-    [adjustHeight]
+    [adjustHeight, signalTyping]
   );
 
   return (
@@ -178,13 +202,20 @@ export function MessageComposer({
             />
           ) : (
             <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-surface">
-              <FileText className="h-6 w-6 text-muted" />
+              {attachmentKind === "video" ? (
+                <Film className="h-6 w-6 text-muted" />
+              ) : isAudio ? (
+                <Music className="h-6 w-6 text-muted" />
+              ) : (
+                <FileText className="h-6 w-6 text-muted" />
+              )}
             </span>
           )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">{attachment.name}</p>
             <p className="text-xs text-muted">
-              {formatFileSize(attachment.size)} · Add a caption below (optional)
+              {formatFileSize(attachment.size)} ·{" "}
+              {isAudio ? "Audio is sent without a caption" : "Add a caption below (optional)"}
             </p>
           </div>
           <Button
@@ -219,7 +250,7 @@ export function MessageComposer({
           className="h-9 w-9 shrink-0 p-0 text-muted hover:text-foreground"
           onClick={() => fileInputRef.current?.click()}
           disabled={sessionExpired || sending || loading}
-          title="Attach photo or document"
+          title="Attach photo, video, audio or document"
           aria-label="Attach photo or document"
         >
           <Paperclip className="h-4 w-4" />
@@ -245,9 +276,11 @@ export function MessageComposer({
           placeholder={
             loading ? 'Loading messages…' : sessionExpired
               ? "Session expired - use a template"
-              : attachment
-                ? "Add a caption…"
-                : "Type a message…"
+              : isAudio
+                ? "Audio is sent without a caption"
+                : attachment
+                  ? "Add a caption…"
+                  : "Type a message…"
           }
           disabled={sessionExpired || sending || loading}
           aria-label="Message text"
@@ -274,7 +307,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge (w-9 button + gap-2 = 44px). */}
       <p className="mt-1 pl-11 text-[10px] text-muted">
-        Enter to send · Shift+Enter for a new line · 📎 photos up to 5 MB, documents up to 25 MB
+        Enter to send · Shift+Enter for a new line · 📎 photos 5 MB, video/audio 16 MB, documents 25 MB
       </p>
     </div>
   );

@@ -330,6 +330,9 @@ export function TemplateManager() {
                   {template.footer_text && (
                     <p className="text-[10px] sm:text-xs text-muted italic">{template.footer_text}</p>
                   )}
+                  {template.status_reason && (
+                    <p className="text-[10px] sm:text-xs text-red-400">{template.status_reason}</p>
+                  )}
                 </div>
                 <Button
                   variant="ghost"

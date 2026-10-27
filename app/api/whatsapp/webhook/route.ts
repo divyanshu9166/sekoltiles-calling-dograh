@@ -16,13 +16,27 @@ import {
   sendAddressMessage,
 } from '@/lib/whatsapp/inquiry-message'
 import {
+  describeInboundExtras,
+  inboundReplyText,
+  isOptInKeyword,
+  isOptOutKeyword,
+  type InboundExtras,
+} from '@/lib/whatsapp/inbound-message'
+import {
+  describeStatusErrors,
+  isMarketingOptOutError,
+  type MetaStatusError,
+} from '@/lib/whatsapp/delivery-errors'
+import { templateStatusReason, normalizeTemplateStatus } from '@/lib/whatsapp/template-status'
+import { engineSendText } from '@/lib/automations/meta-send'
+import {
   getBotState,
   isAppointmentBookingRequest,
   startAppointmentBot,
   handleAppointmentBotMessage,
 } from '@/lib/whatsapp/appointment-bot'
 
-interface WhatsAppMessage {
+interface WhatsAppMessage extends InboundExtras {
   id: string
   from: string
   timestamp: string
@@ -36,12 +50,23 @@ interface WhatsAppMessage {
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
   context?: { id: string }
-  /** Interactive button/list reply from the customer */
-  interactive?: {
-    type: 'button_reply' | 'list_reply'
-    button_reply?: { id: string; title: string }
-    list_reply?: { id: string; title: string }
-  }
+  /** Present when the customer came from a Click-to-WhatsApp ad or post. */
+  referral?: { source_url?: string; source_type?: string; headline?: string; body?: string }
+}
+
+interface WhatsAppStatus {
+  id: string
+  status: string
+  timestamp: string
+  recipient_id: string
+  errors?: MetaStatusError[]
+}
+
+interface TemplateStatusUpdate {
+  event?: string
+  message_template_name?: string
+  message_template_language?: string
+  reason?: string | null
 }
 
 interface WhatsAppWebhookEntry {
@@ -58,13 +83,8 @@ interface WhatsAppWebhookEntry {
         wa_id: string
       }>
       messages?: WhatsAppMessage[]
-      statuses?: Array<{
-        id: string
-        status: string
-        timestamp: string
-        recipient_id: string
-      }>
-    }
+      statuses?: WhatsAppStatus[]
+    } & TemplateStatusUpdate
     field: string
   }>
 }
@@ -184,6 +204,11 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
     for (const change of entry.changes) {
       const value = change.value
 
+      if (change.field === 'message_template_status_update') {
+        await handleTemplateStatusUpdate(entry.id, value)
+        continue
+      }
+
       // Handle status updates
       if (value.statuses) {
         for (const status of value.statuses) {
@@ -267,19 +292,82 @@ function isValidStatusTransition(current: string, incoming: string): boolean {
   return ii > ci
 }
 
-async function handleStatusUpdate(status: {
-  id: string
-  status: string
-  timestamp: string
-  recipient_id: string
-}) {
-  // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status.
+/**
+ * Meta's "template approved / rejected / paused" webhook. entry.id is the
+ * WABA ID; templates are matched by name and language like the sync route.
+ */
+async function handleTemplateStatusUpdate(wabaId: string, update: TemplateStatusUpdate) {
+  if (!update.event || !update.message_template_name) return
   try {
-    await prisma.waMessage.updateMany({
-      where: { message_id: status.id },
-      data: { status: status.status },
+    const config = await prisma.waWhatsappConfig.findFirst({
+      where: { waba_id: wabaId },
+      select: { user_id: true },
     })
+    if (!config) {
+      console.warn('[webhook] template status for unknown WABA:', wabaId)
+      return
+    }
+    const result = await prisma.waMessageTemplate.updateMany({
+      where: {
+        user_id: config.user_id,
+        name: update.message_template_name,
+        ...(update.message_template_language ? { language: update.message_template_language } : {}),
+      },
+      data: {
+        status: normalizeTemplateStatus(update.event),
+        status_reason: templateStatusReason(update.event, update.reason),
+      },
+    })
+    console.log(
+      `[webhook] template ${update.message_template_name} → ${update.event} (${result.count} row(s))`,
+    )
+  } catch (error) {
+    console.error('[webhook] template status update failed:', error)
+  }
+}
+
+/** The customer opted out of marketing: future broadcasts skip them. */
+async function markContactOptedOut(contactId: string) {
+  try {
+    await prisma.waContact.updateMany({
+      where: { id: contactId, opted_out_at: null },
+      data: { opted_out_at: new Date() },
+    })
+  } catch (error) {
+    console.error('[webhook] marking contact opted out failed:', error)
+  }
+}
+
+async function handleStatusUpdate(status: WhatsAppStatus) {
+  const errorMessage = status.status === 'failed' ? describeStatusErrors(status.errors) : null
+  // #131050: the customer turned off marketing messages in WhatsApp itself.
+  const optedOut = status.status === 'failed' && isMarketingOptOutError(status.errors)
+
+  // 1) Mirror onto the inbox message, forward-only so a late "delivered"
+  //    never overwrites "read", then push the new ticks to open inboxes.
+  try {
+    const message = await prisma.waMessage.findFirst({
+      where: { message_id: status.id },
+      select: {
+        id: true,
+        status: true,
+        conversation_id: true,
+        conversation: { select: { user_id: true, contact_id: true } },
+      },
+    })
+    if (message && isValidStatusTransition(message.status, status.status)) {
+      await prisma.waMessage.update({
+        where: { id: message.id },
+        data: { status: status.status, ...(errorMessage ? { error_message: errorMessage } : {}) },
+      })
+      await publishEvent('chat_events', {
+        type: 'message_status',
+        userId: message.conversation.user_id,
+        conversationId: message.conversation_id,
+        payload: { messageId: message.id, status: status.status, error_message: errorMessage },
+      })
+    }
+    if (message && optedOut) await markContactOptedOut(message.conversation.contact_id)
   } catch (error) {
     console.error('Error updating message status:', error)
   }
@@ -291,12 +379,12 @@ async function handleStatusUpdate(status: {
   //    trigger hasn't been applied to the live database.
   const tsDate = new Date(parseInt(status.timestamp) * 1000)
 
-  let recipient: { id: string; status: string; broadcast_id: string } | null = null
+  let recipient: { id: string; status: string; broadcast_id: string; contact_id: string | null } | null = null
 
   try {
     recipient = await prisma.waBroadcastRecipient.findFirst({
       where: { whatsapp_message_id: status.id },
-      select: { id: true, status: true, broadcast_id: true },
+      select: { id: true, status: true, broadcast_id: true, contact_id: true },
     })
   } catch (error) {
     console.error('Error fetching broadcast recipient:', error)
@@ -304,6 +392,8 @@ async function handleStatusUpdate(status: {
   }
 
   if (!recipient) return // message wasn't part of a broadcast — fine
+
+  if (optedOut && recipient.contact_id) await markContactOptedOut(recipient.contact_id)
 
   // Guard transitions — forward-only on the success ladder, and
   // `failed` only from pre-delivered states.
@@ -313,6 +403,7 @@ async function handleStatusUpdate(status: {
   if (status.status === 'sent') update.sent_at = tsDate
   if (status.status === 'delivered') update.delivered_at = tsDate
   if (status.status === 'read') update.read_at = tsDate
+  if (errorMessage) update.error_message = errorMessage
 
   try {
     await prisma.waBroadcastRecipient.update({
@@ -489,6 +580,23 @@ async function handleReaction(
   }
 }
 
+// Inbound message IDs seen by this server process in the last 15 minutes.
+const recentInboundIds = new Map<string, number>()
+const INBOUND_DEDUPE_MS = 15 * 60 * 1000
+
+function claimInboundMessage(id: string): boolean {
+  const now = Date.now()
+  const seenAt = recentInboundIds.get(id)
+  if (seenAt !== undefined && now - seenAt < INBOUND_DEDUPE_MS) return false
+  recentInboundIds.set(id, now)
+  if (recentInboundIds.size > 5000) {
+    for (const [key, at] of recentInboundIds) {
+      if (now - at >= INBOUND_DEDUPE_MS) recentInboundIds.delete(key)
+    }
+  }
+  return true
+}
+
 async function processMessage(
   message: WhatsAppMessage,
   contact: { profile: { name: string }; wa_id: string },
@@ -520,31 +628,22 @@ async function processMessage(
     return
   }
 
-  // ── Interactive button reply handling ───────────────────────────────────
-  // Customer clicked one of our quick-reply buttons (inquiry welcome / slot picker).
-  if (message.type === 'interactive' && message.interactive?.button_reply) {
-    const buttonId = message.interactive.button_reply.id
-    const buttonTitle = message.interactive.button_reply.title
-    const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
-    if (waConfigRow) {
-      const waConfig = { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) }
-      if (buttonId === 'SCHEDULE_APPOINTMENT') {
-        await startAppointmentBot({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId }, waConfig)
-        return
-      }
-      if (buttonId === 'INFO_PRODUCTS') {
-        await sendProductInfoMessage(userId, senderPhone, conversation.id)
-        return
-      }
-      if (buttonId === 'INFO_ADDRESS') {
-        await sendAddressMessage(userId, senderPhone, conversation.id)
-        return
-      }
-      if (buttonId.startsWith('SLOT_')) {
-        const handled = await handleAppointmentBotMessage({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId, incomingText: buttonTitle, buttonReplyId: buttonId }, waConfig)
-        if (handled) return
-      }
-    }
+  // Meta re-delivers a webhook when our ack is slow or fails. Without this
+  // the message would be stored twice and the welcome menu, bot replies and
+  // automations would all fire twice. The in-memory claim covers a retry
+  // that arrives while the first copy is still being processed; the DB
+  // check covers retries after a restart.
+  if (!claimInboundMessage(message.id)) {
+    console.log(`[webhook] skipped duplicate delivery of ${message.id} (in progress)`)
+    return
+  }
+  const alreadyStored = await prisma.waMessage.findFirst({
+    where: { message_id: message.id, conversation_id: conversation.id },
+    select: { id: true },
+  })
+  if (alreadyStored) {
+    console.log(`[webhook] skipped duplicate delivery of ${message.id}`)
+    return
   }
 
   // Parse message content based on type
@@ -553,6 +652,22 @@ async function processMessage(
     accessToken
   )
   const inboundText = contentText ?? message.text?.body ?? ''
+  // Template quick-reply buttons and list/button replies act like typed text
+  // for keyword automations and the AI agent.
+  const isTextLike = message.type === 'text' || inboundReplyText(message) !== null
+  const isOptOut = isTextLike && isOptOutKeyword(inboundText)
+  const isOptIn = isTextLike && isOptInKeyword(inboundText)
+
+  // The ad or post a Click-to-WhatsApp lead came from, kept on the message
+  // so the team can see which campaign brought them in.
+  const adSource = message.referral
+    ? message.referral.headline || message.referral.body || message.referral.source_url
+    : null
+  const storedText = adSource
+    ? [contentText, `📣 Came from ${message.referral?.source_type === 'post' ? 'post' : 'ad'}: ${adSource}`]
+        .filter(Boolean)
+        .join('\n\n')
+    : contentText
 
   let replyToInternalId: string | null = null
   if (message.context?.id) {
@@ -605,7 +720,7 @@ async function processMessage(
         conversation_id: conversation.id,
         sender_type: 'customer',
         content_type: contentType,
-        content_text: contentText,
+        content_text: storedText,
         media_url: mediaUrl,
         message_id: message.id,
         status: 'delivered',
@@ -637,7 +752,8 @@ async function processMessage(
   // ── Send 3-button inquiry welcome to brand-new contacts ─────────────────
   // isFirstInboundMessage is true when the contact has NEVER messaged us.
   // A direct appointment request takes priority over the generic welcome menu.
-  if (isFirstInboundMessage) {
+  // Someone whose first message is STOP gets the opt-out reply, not the menu.
+  if (isFirstInboundMessage && !isOptOut && !isOptIn) {
     if (message.type === 'text' && isAppointmentBookingRequest(inboundText)) {
       const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
       if (waConfigRow) {
@@ -664,7 +780,7 @@ async function processMessage(
     updatedConversation = await prisma.waConversation.update({
       where: { id: conversation.id },
       data: {
-        last_message_text: contentText || `[${message.type}]`,
+        last_message_text: storedText || `[${message.type}]`,
         last_message_at: new Date(),
         unread_count: { increment: 1 },
       },
@@ -741,6 +857,53 @@ async function processMessage(
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
+  // ── Our own quick-reply buttons (inquiry welcome menu / slot picker) ─────
+  // Stored above like any message so the team sees what the customer tapped.
+  const buttonReply = message.type === 'interactive' ? message.interactive?.button_reply : undefined
+  if (buttonReply) {
+    const buttonId = buttonReply.id
+    const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
+    if (waConfigRow) {
+      const waConfig = { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) }
+      if (buttonId === 'SCHEDULE_APPOINTMENT') {
+        await startAppointmentBot({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId }, waConfig)
+        return
+      }
+      if (buttonId === 'INFO_PRODUCTS') {
+        await sendProductInfoMessage(userId, senderPhone, conversation.id)
+        return
+      }
+      if (buttonId === 'INFO_ADDRESS') {
+        await sendAddressMessage(userId, senderPhone, conversation.id)
+        return
+      }
+      if (buttonId.startsWith('SLOT_')) {
+        const handled = await handleAppointmentBotMessage({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId, incomingText: buttonReply.title, buttonReplyId: buttonId }, waConfig)
+        if (handled) return
+      }
+    }
+  }
+
+  // ── Marketing opt-out / opt-in (STOP / START) ────────────────────────────
+  // Broadcasts skip opted-out contacts. Automations and the AI agent stay
+  // quiet so the confirmation is the only reply.
+  if (isOptOut || isOptIn) {
+    await prisma.waContact.update({
+      where: { id: contactRecord.id },
+      data: { opted_out_at: isOptOut ? (contactRecord.opted_out_at ?? new Date()) : null },
+    }).catch((err) => console.error('[webhook] saving opt-out choice failed:', err))
+    await engineSendText({
+      userId,
+      conversationId: conversation.id,
+      contactId: contactRecord.id,
+      text: isOptOut
+        ? "You won't get offers from us on WhatsApp any more. Reply START to subscribe again."
+        : "You're subscribed to our offers on WhatsApp again. Reply STOP anytime to unsubscribe.",
+    }).catch((err) => console.error('[webhook] opt-out confirmation failed:', err))
+    console.log(`[webhook] contact ${contactRecord.id} opted ${isOptOut ? 'out' : 'in'}`)
+    return
+  }
+
   // ── BullMQ: enqueue automation triggers (durable, retryable) ───────────
   // Using BullMQ instead of fire-and-forget so a transient failure (e.g.
   // automation engine timeout) doesn't silently drop triggers. BullMQ
@@ -781,7 +944,7 @@ async function processMessage(
   // ── BullMQ: enqueue AI agent job (if agent is enabled + conversation is open)
   // Only process text messages — skip media/stickers/locations.
   // Also skip for first-inbound-message contacts — the welcome menu IS the reply.
-  if (!isFirstInboundMessage && message.type === 'text' && inboundText && conversation.status === 'open') {
+  if (!isFirstInboundMessage && isTextLike && inboundText && conversation.status === 'open') {
     // ── Appointment bot takes priority over AI agent ───────────────────────
     const activeBotState = await getBotState(conversation.id).catch(() => null)
     if (activeBotState) {
@@ -951,7 +1114,7 @@ async function parseMessageContent(
 
     default:
       return {
-        contentText: `[Unsupported message type: ${message.type}]`,
+        contentText: describeInboundExtras(message) ?? `[Unsupported message type: ${message.type}]`,
         mediaUrl: null,
         mediaType: null,
       }

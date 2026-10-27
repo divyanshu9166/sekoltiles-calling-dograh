@@ -69,9 +69,19 @@ export async function POST(request: Request) {
       excludeSet = new Set(excludeRows.map(r => r.contact_id))
     }
 
-    const effective = [...baseIds].filter(id => !excludeSet.has(id))
-    
-    return NextResponse.json({ count: effective.length })
+    const candidates = [...baseIds].filter(id => !excludeSet.has(id))
+
+    // Customers who replied STOP or turned off marketing in WhatsApp are skipped.
+    const optedOut = candidates.length
+      ? await prisma.waContact.findMany({
+          where: { id: { in: candidates }, user_id: userId, opted_out_at: { not: null } },
+          select: { id: true },
+        })
+      : []
+    const optedOutIds = new Set(optedOut.map(c => c.id))
+    const effective = candidates.filter(id => !optedOutIds.has(id))
+
+    return NextResponse.json({ count: effective.length, opted_out: optedOutIds.size })
   } catch (error) {
     console.error('Error in audience preview:', error)
     return NextResponse.json({ error: 'Failed to preview audience' }, { status: 500 })

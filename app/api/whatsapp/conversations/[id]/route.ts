@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth-helpers'
+import { markConversationRead } from '@/lib/whatsapp/read-receipts'
 
 export async function PATCH(
     request: Request,
@@ -68,6 +69,12 @@ export async function PATCH(
         const updatedConv = await prisma.waConversation.findUnique({
             where: { id: conversationId },
         })
+
+        // Opening an unread chat clears the badge; tell WhatsApp too so the
+        // customer sees blue ticks.
+        if (updates.unread_count === 0) {
+            void markConversationRead({ userId, conversationId })
+        }
 
         if (updatedConv) {
             import('@/lib/redis').then(({ publishEvent }) => {

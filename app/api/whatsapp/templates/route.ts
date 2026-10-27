@@ -18,6 +18,7 @@ function serializeTemplate(template: {
     footer_text: string | null
     buttons: unknown
     status: string
+    status_reason: string | null
     created_at: Date
 }) {
     return {
@@ -32,6 +33,7 @@ function serializeTemplate(template: {
         footer_text: template.footer_text,
         buttons: template.buttons,
         status: template.status,
+        status_reason: template.status_reason,
         created_at: template.created_at.toISOString(),
     }
 }

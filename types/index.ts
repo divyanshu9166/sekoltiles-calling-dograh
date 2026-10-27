@@ -16,6 +16,8 @@ export interface Contact {
   email?: string;
   company?: string;
   avatar_url?: string;
+  /** Set when the customer opted out of marketing; broadcasts skip them. */
+  opted_out_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +92,8 @@ export interface Message {
   template_name?: string;
   message_id?: string;
   status: MessageStatus;
+  /** Meta's reason when an outgoing message failed to deliver. */
+  error_message?: string | null;
   created_at: string;
   reply_to_message_id?: string;
 }
@@ -129,6 +133,8 @@ export interface MessageTemplate {
   footer_text?: string;
   buttons?: Record<string, unknown>[];
   status?: 'Draft' | 'Pending' | 'Approved' | 'Rejected';
+  /** Meta's reason for a rejected, paused or disabled template. */
+  status_reason?: string | null;
   created_at: string;
 }
 

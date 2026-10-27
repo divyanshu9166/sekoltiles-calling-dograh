@@ -194,7 +194,7 @@ export function useRealtime({
 
       socket.on(
         "message_status",
-        (data: { messageId?: string; status?: string; conversationId?: string }) => {
+        (data: { messageId?: string; status?: string; conversationId?: string; error_message?: string | null }) => {
           if (!data.messageId) return;
 
           onMessageRef.current?.({
@@ -202,6 +202,7 @@ export function useRealtime({
             new: {
               id: data.messageId,
               status: data.status,
+              ...(data.error_message ? { error_message: data.error_message } : {}),
             } as Message,
             old: {},
           });

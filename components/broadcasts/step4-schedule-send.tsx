@@ -58,6 +58,7 @@ export function Step4ScheduleSend({
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
+  const [optedOutCount, setOptedOutCount] = useState(0);
   const [loadingReach, setLoadingReach] = useState(true);
 
   useEffect(() => {
@@ -76,8 +77,9 @@ export function Step4ScheduleSend({
         });
         
         if (res.ok) {
-          const { count } = await res.json();
+          const { count, opted_out } = await res.json();
           setEstimatedReach(count ?? 0);
+          setOptedOutCount(opted_out ?? 0);
         } else {
           setEstimatedReach(0);
         }
@@ -142,6 +144,11 @@ export function Step4ScheduleSend({
                 <>
                   <Users className="h-3.5 w-3.5 text-accent" />
                   <p className="font-medium text-foreground">{estimatedReach.toLocaleString()}</p>
+                  {optedOutCount > 0 && (
+                    <span className="text-xs text-muted" title="These customers replied STOP or turned off marketing messages">
+                      ({optedOutCount.toLocaleString()} opted out, skipped)
+                    </span>
+                  )}
                 </>
               )}
             </div>

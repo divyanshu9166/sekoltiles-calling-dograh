@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { normalizeTemplateStatus, templateStatusReason } from '@/lib/whatsapp/template-status'
 
 /**
  * Sync message templates from Meta → local message_templates table.
@@ -48,6 +49,7 @@ interface MetaTemplate {
   status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAUSED'
   category: string
   components?: MetaTemplateComponent[]
+  rejected_reason?: string
 }
 
 /**
@@ -61,28 +63,6 @@ function normalizeCategory(
   if (upper === 'UTILITY') return 'Utility'
   if (upper === 'AUTHENTICATION') return 'Authentication'
   return 'Marketing'
-}
-
-/**
- * Meta's template status is UPPERCASE; our DB uses TitleCase.
- */
-function normalizeStatus(
-  meta: string,
-): 'Draft' | 'Pending' | 'Approved' | 'Rejected' {
-  switch (meta.toUpperCase()) {
-    case 'APPROVED':
-      return 'Approved'
-    case 'PENDING':
-    case 'IN_APPEAL':
-    case 'PENDING_DELETION':
-      return 'Pending'
-    case 'REJECTED':
-    case 'DISABLED':
-    case 'PAUSED':
-      return 'Rejected'
-    default:
-      return 'Draft'
-  }
 }
 
 export async function POST() {
@@ -128,7 +108,7 @@ export async function POST() {
     const metaTemplates: MetaTemplate[] = []
     let nextUrl:
       | string
-      | null = `${META_API_BASE}/${config.waba_id}/message_templates?limit=100&fields=id,name,language,status,category,components`
+      | null = `${META_API_BASE}/${config.waba_id}/message_templates?limit=100&fields=id,name,language,status,category,components,rejected_reason`
     const PAGE_CAP = 20
     let pageCount = 0
 
@@ -179,7 +159,8 @@ export async function POST() {
         body_text: body?.text ?? '',
         footer_text: footer?.text ?? null,
         buttons: buttons?.buttons as any ?? null,
-        status: normalizeStatus(t.status),
+        status: normalizeTemplateStatus(t.status),
+        status_reason: templateStatusReason(t.status, t.rejected_reason),
       }
 
       try {

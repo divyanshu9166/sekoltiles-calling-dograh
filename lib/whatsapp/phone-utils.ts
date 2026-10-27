@@ -174,7 +174,16 @@ export function humanReadableMetaError(rawError: string): string {
       'and make sure the template is approved in WhatsApp Manager.'
     )
   }
-  if (/190|access.token|OAuthException/i.test(rawError)) {
+  if (/\b132012\b|parameter format does not match/i.test(rawError)) {
+    return (
+      'The template header or variables are in the wrong format. ' +
+      'If the template has a photo, video or document header, attach one before sending.'
+    )
+  }
+  if (/\b131056\b|\b130429\b|rate limit/i.test(rawError)) {
+    return 'Sending too fast for your WhatsApp limit. Wait a minute and try again.'
+  }
+  if (/\b190\b|access.token|OAuthException/i.test(rawError)) {
     return (
       'Your WhatsApp access token is invalid or expired. ' +
       'Update it in WhatsApp Marketing → Settings.'

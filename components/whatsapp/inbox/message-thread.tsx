@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday, isValid } from "date-fns";
 import { customerSession, mergeInboxMessages, templatePickerProblem } from "@/lib/whatsapp/inbox-state";
+import type { HeaderMediaUpload } from "@/lib/whatsapp/use-template-header-upload";
 import { checkOutboundMedia, mediaMessageText } from "@/lib/whatsapp/outbound-media";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -534,7 +535,7 @@ export function MessageThread({
   }, []);
 
   const handleSendTemplate = useCallback(
-    async (template: MessageTemplate, params: string[]) => {
+    async (template: MessageTemplate, params: string[], headerMedia?: HeaderMediaUpload) => {
       if (!conversation) return false;
       const problem = templatePickerProblem(template);
       if (problem) { toast.error(problem); return false; }
@@ -549,6 +550,8 @@ export function MessageThread({
         content_type: "template",
         content_text: renderedBody,
         template_name: template.name,
+        // Same proxy URL the send API stores for photo headers.
+        media_url: headerMedia?.type === "image" ? `/api/whatsapp/media/${headerMedia.id}` : undefined,
         status: "sending",
         created_at: new Date().toISOString(),
       };
@@ -562,7 +565,11 @@ export function MessageThread({
             conversation_id: conversation.id,
             message_type: "template",
             template_name: template.name,
+            template_language: template.language,
             template_params: params,
+            ...(headerMedia
+              ? { header_media: { type: headerMedia.type, id: headerMedia.id, filename: headerMedia.filename } }
+              : {}),
             content_text: renderedBody,
           }),
         });

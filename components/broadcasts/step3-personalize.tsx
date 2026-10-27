@@ -11,7 +11,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, Loader2, Paperclip } from 'lucide-react';
+import type { useTemplateHeaderUpload } from '@/lib/whatsapp/use-template-header-upload';
 
 type VariableType = 'static' | 'field' | 'custom_field';
 
@@ -24,9 +25,14 @@ interface Step3Props {
   template: MessageTemplate;
   variables: Record<string, VariableMapping>;
   onUpdate: (variables: Record<string, VariableMapping>) => void;
+  /** Upload state for a template with a photo, video or PDF header. */
+  headerUpload: ReturnType<typeof useTemplateHeaderUpload>;
   onNext: () => void;
   onBack: () => void;
 }
+
+const HEADER_LABEL = { image: 'photo', video: 'video', document: 'PDF' } as const;
+const HEADER_ACCEPT = { image: 'image/jpeg,image/png', video: 'video/mp4', document: 'application/pdf,.pdf' } as const;
 
 const contactFields = [
   { value: 'name', label: 'Contact Name' },
@@ -50,9 +56,15 @@ export function Step3Personalize({
   template,
   variables,
   onUpdate,
+  headerUpload,
   onNext,
   onBack,
 }: Step3Props) {
+  const headerType =
+    template.header_type === 'image' || template.header_type === 'video' || template.header_type === 'document'
+      ? template.header_type
+      : null;
+  const headerMissing = !!headerType && (!headerUpload.media || headerUpload.uploading);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [loadingFields, setLoadingFields] = useState(true);
   const [firstContact, setFirstContact] = useState<Contact | null>(null);
@@ -300,6 +312,38 @@ export function Step3Personalize({
         </div>
       )}
 
+      {headerType && (
+        <div className="glass-card space-y-2 p-4">
+          <p className="text-sm font-medium text-foreground">Header {HEADER_LABEL[headerType]}</p>
+          <p className="text-xs text-muted">
+            This template has a {HEADER_LABEL[headerType]} header. Every recipient gets the file you choose here.
+          </p>
+          <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface-light px-3 py-2 text-sm text-muted hover:border-accent">
+            {headerUpload.uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            <span className="truncate">
+              {headerUpload.uploading
+                ? 'Uploading…'
+                : headerUpload.media
+                  ? headerUpload.media.filename
+                  : `Choose the ${HEADER_LABEL[headerType]}`}
+            </span>
+            <input
+              type="file"
+              accept={HEADER_ACCEPT[headerType]}
+              className="hidden"
+              aria-label={`Header ${HEADER_LABEL[headerType]}`}
+              disabled={headerUpload.uploading}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void headerUpload.upload(headerType, file);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {headerUpload.error && <p className="text-xs text-warning">{headerUpload.error}</p>}
+        </div>
+      )}
+
       {/* Live Preview - rendered as a WhatsApp-style bubble so the user
           sees approximately what the recipient will see. */}
       <div className="glass-card p-4">
@@ -313,6 +357,10 @@ export function Step3Personalize({
         </div>
         <div className="rounded-lg bg-[#e5ddd5] p-3">
           <div className="ml-auto max-w-[85%] rounded-lg bg-[#dcf8c6] px-3 py-2 shadow-sm">
+            {headerUpload.media?.previewUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={headerUpload.media.previewUrl} alt="Header" className="mb-2 max-h-48 rounded-md object-cover" />
+            )}
             <p className="whitespace-pre-wrap text-sm text-[#303030]">
               {previewText}
             </p>
@@ -330,6 +378,12 @@ export function Step3Personalize({
         </div>
       )}
 
+      {headerType && !headerUpload.media && !headerUpload.uploading && (
+        <div className="rounded-md border border-warning/30 bg-warning-light px-3 py-2 text-xs text-warning">
+          Choose the header {HEADER_LABEL[headerType]} before continuing. Meta rejects this template without it.
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-border pt-4">
         <Button
           variant="outline"
@@ -341,7 +395,7 @@ export function Step3Personalize({
         </Button>
         <Button
           onClick={onNext}
-          disabled={unmappedKeys.length > 0}
+          disabled={unmappedKeys.length > 0 || headerMissing}
           className="bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
         >
           Next

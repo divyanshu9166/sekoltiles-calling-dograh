@@ -15,6 +15,7 @@ import {
   type OutboundMediaKind,
 } from '@/lib/whatsapp/outbound-media'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
+import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import {
   normalizePhoneForMetaIndia,
   isValidE164,
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
       return rateLimitResponse(limit)
     }
 
-    // Images and documents arrive as multipart/form-data with a `file`;
+    // Files (photos, videos, audio, documents) arrive as multipart/form-data with a `file`;
     // text and template sends stay JSON.
     let conversation_id: string | undefined
     let message_type: string | undefined
@@ -53,6 +54,8 @@ export async function POST(request: Request) {
     let media_url: string | undefined
     let template_name: string | undefined
     let template_params: string[] | undefined
+    let template_language: string | undefined
+    let header_media: unknown
     let reply_to_message_id: string | undefined
     let upload: { file: Blob; kind: OutboundMediaKind; mimeType: string; filename: string } | null = null
 
@@ -73,6 +76,12 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: check.error }, { status: 400 })
       }
       const caption = String(form.get('caption') ?? '').trim()
+      if (check.kind === 'audio' && caption) {
+        return NextResponse.json(
+          { error: 'WhatsApp sends audio without a caption. Remove the text or send it as a separate message.' },
+          { status: 400 }
+        )
+      }
       if (caption.length > MEDIA_CAPTION_LIMIT) {
         return NextResponse.json(
           { error: `Caption can be at most ${MEDIA_CAPTION_LIMIT} characters` },
@@ -93,6 +102,8 @@ export async function POST(request: Request) {
         media_url,
         template_name,
         template_params,
+        template_language,
+        header_media,
         reply_to_message_id,
       } = body)
     }
@@ -116,6 +127,13 @@ export async function POST(request: Request) {
         { error: 'template_name is required for template messages' },
         { status: 400 }
       )
+    }
+
+    // Photo/video/PDF for a template with a media header (uploaded first
+    // through /api/whatsapp/media/upload).
+    const headerMedia = message_type === 'template' ? parseHeaderMedia(header_media) : null
+    if (message_type === 'template' && header_media && !headerMedia) {
+      return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
     }
 
     // Fetch conversation and contact
@@ -250,7 +268,10 @@ export async function POST(request: Request) {
           accessToken,
           to: phone,
           templateName: template_name ?? '',
-          params: template_params || [],
+          language: template_language || undefined,
+          ...(headerMedia
+            ? { componentParams: { body: template_params || [], headerMedia } }
+            : { params: template_params || [] }),
           contextMessageId,
         })
         return result.messageId
@@ -330,7 +351,8 @@ export async function POST(request: Request) {
         content_text: upload
           ? mediaMessageText(upload.kind, upload.filename, content_text)
           : content_text || null,
-        media_url: media_url || null,
+        // Only photo headers are previewed in the inbox bubble.
+        media_url: headerMedia?.type === 'image' ? `/api/whatsapp/media/${headerMedia.id}` : media_url || null,
         template_name: template_name || null,
         message_id: waMessageId,
         status: 'sent',

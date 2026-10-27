@@ -22,6 +22,33 @@ interface ContactSidebarProps {
 
 export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [copied, setCopied] = useState(false);
+  const [optedOutAt, setOptedOutAt] = useState<string | null>(contact?.opted_out_at ?? null);
+  const [savingOptOut, setSavingOptOut] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setOptedOutAt(contact?.opted_out_at ?? null);
+  }, [contact?.id, contact?.opted_out_at]);
+
+  const toggleOptOut = useCallback(async () => {
+    if (!contact) return;
+    const next = !optedOutAt;
+    setSavingOptOut(true);
+    try {
+      const res = await fetch(`/api/whatsapp/contacts/${contact.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ opted_out: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setOptedOutAt(next ? new Date().toISOString() : null);
+      toast.success(next ? "Opted out: broadcasts will skip this contact" : "Subscribed to broadcasts again");
+    } catch {
+      toast.error("Could not update marketing preference");
+    } finally {
+      setSavingOptOut(false);
+    }
+  }, [contact, optedOutAt]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -38,16 +65,19 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     return () => { activeContactId.current = null; };
   }, [contact?.id]);
 
+  // Keyed on the id: the conversation list hands over a new contact object
+  // on every refresh, which must not re-fetch the sidebar each time.
+  const contactId = contact?.id;
   const fetchContactData = useCallback(async () => {
-    if (!contact) return;
-    const targetId = contact.id;
+    if (!contactId) return;
+    const targetId = contactId;
     try {
 
     // Fetch deals, notes, and contact details (with tags) in parallel
     const [dealsRes, notesRes, contactRes] = await Promise.all([
-      fetch(`/api/whatsapp/contacts/${contact.id}/deals`, { cache: 'no-store' }),
-      fetch(`/api/whatsapp/contacts/${contact.id}/notes`, { cache: 'no-store' }),
-      fetch(`/api/whatsapp/contacts/${contact.id}`, { cache: 'no-store' }),
+      fetch(`/api/whatsapp/contacts/${targetId}/deals`, { cache: 'no-store' }),
+      fetch(`/api/whatsapp/contacts/${targetId}/notes`, { cache: 'no-store' }),
+      fetch(`/api/whatsapp/contacts/${targetId}`, { cache: 'no-store' }),
     ]);
     if (activeContactId.current !== targetId) return;
     if (!dealsRes.ok || !notesRes.ok || !contactRes.ok) throw new Error('Unable to load contact details');
@@ -70,7 +100,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     }
     setLoadError('');
     } catch { if (activeContactId.current === targetId) setLoadError('Unable to refresh contact details.'); }
-  }, [contact]);
+  }, [contactId]);
 
   // Load on contact change.
   useEffect(() => {
@@ -174,6 +204,28 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+
+            {/* Marketing opt-out: set by a STOP reply, WhatsApp's own
+                "stop promotions" button, or by hand here. */}
+            <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs">
+              <span className={optedOutAt ? "flex-1 text-red-400" : "flex-1 text-muted"}>
+                {optedOutAt
+                  ? `Opted out of broadcasts${(() => {
+                      const d = new Date(optedOutAt);
+                      return Number.isNaN(d.getTime()) ? "" : ` on ${format(d, "d MMM yyyy")}`;
+                    })()}`
+                  : "Gets broadcasts"}
+              </span>
+              <button
+                type="button"
+                onClick={toggleOptOut}
+                disabled={savingOptOut}
+                title={optedOutAt ? "Only re-subscribe if the customer asked for offers again" : "Stop sending broadcasts to this contact"}
+                className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-surface-light disabled:opacity-50"
+              >
+                {optedOutAt ? "Re-subscribe" : "Opt out"}
+              </button>
+            </div>
           </div>
 
           {/* Divider */}

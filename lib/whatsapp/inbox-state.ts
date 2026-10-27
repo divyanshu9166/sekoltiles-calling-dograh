@@ -33,7 +33,6 @@ export function customerSession(messages: Message[], now = Date.now()) {
 }
 
 export function templatePickerProblem(template: MessageTemplate): string | null {
-  if (template.header_type && !['text'].includes(template.header_type)) return 'This template requires media header parameters not supported by this inbox picker.'
   if (template.header_content?.includes('{{') || template.buttons?.some(button => JSON.stringify(button).includes('{{') || button.type === 'OTP')) return 'This template needs header/button parameters. Use a body-only template in this picker.'
   const tokens = [...template.body_text.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map(match => match[1].trim())
   if (tokens.some(token => !/^[1-9]\d*$/.test(token))) return 'Named template variables are not supported by this picker.'

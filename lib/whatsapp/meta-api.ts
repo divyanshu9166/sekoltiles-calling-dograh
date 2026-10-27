@@ -163,6 +163,19 @@ export interface TemplateComponentParams {
   body?: string[]
   /** Variables for BUTTON components (e.g. dynamic URL suffixes) */
   buttons?: Array<{ index: number; sub_type: 'url' | 'quick_reply'; value: string }>
+  /**
+   * Photo, video or document for a template with a media HEADER. Meta
+   * rejects (#132012) a media-header template sent without one.
+   */
+  headerMedia?: TemplateHeaderMedia
+}
+
+export interface TemplateHeaderMedia {
+  type: 'image' | 'video' | 'document'
+  /** Media ID from uploadMedia. */
+  id: string
+  /** Shown as the document's name. */
+  filename?: string
 }
 
 export interface SendTemplateMessageArgs {
@@ -216,7 +229,12 @@ export async function sendTemplateMessage(
   const components: Record<string, unknown>[] = []
 
   if (componentParams) {
-    if (componentParams.header && componentParams.header.length > 0) {
+    if (componentParams.headerMedia) {
+      const { type, id, filename } = componentParams.headerMedia
+      const media: Record<string, string> = { id }
+      if (type === 'document' && filename) media.filename = filename
+      components.push({ type: 'header', parameters: [{ type, [type]: media }] })
+    } else if (componentParams.header && componentParams.header.length > 0) {
       components.push({
         type: 'header',
         parameters: componentParams.header.map((p) => ({ type: 'text', text: String(p) })),
@@ -412,8 +430,9 @@ export interface SendMediaMessageArgs {
   phoneNumberId: string
   accessToken: string
   to: string
-  kind: 'image' | 'document'
+  kind: 'image' | 'document' | 'video' | 'audio'
   mediaId: string
+  /** Ignored for audio, which WhatsApp sends without a caption. */
   caption?: string
   /** Shown to the customer as the document's name. */
   filename?: string
@@ -421,14 +440,14 @@ export interface SendMediaMessageArgs {
 }
 
 /**
- * Send an uploaded image or document. Like text, free-form media only works
- * inside the 24-hour customer service window.
+ * Send an uploaded image, document, video or audio file. Like text, free-form
+ * media only works inside the 24-hour customer service window.
  */
 export async function sendMediaMessage(args: SendMediaMessageArgs): Promise<MetaSendResult> {
   const { phoneNumberId, accessToken, to, kind, mediaId, caption, filename, contextMessageId } = args
 
   const media: Record<string, string> = { id: mediaId }
-  if (caption) media.caption = caption
+  if (caption && kind !== 'audio') media.caption = caption
   if (kind === 'document' && filename) media.filename = filename
 
   const body: Record<string, unknown> = {
@@ -455,6 +474,47 @@ export async function sendMediaMessage(args: SendMediaMessageArgs): Promise<Meta
   }
   const data = await response.json()
   return { messageId: data.messages[0].id }
+}
+
+// ============================================================
+// Read receipts and typing indicator
+// ============================================================
+
+export interface MarkMessageReadArgs {
+  phoneNumberId: string
+  accessToken: string
+  /** WhatsApp ID (wamid) of the customer's latest message. */
+  messageId: string
+  /** Also show "typing…" to the customer until the reply is sent (max 25 s). */
+  typing?: boolean
+}
+
+/**
+ * Mark a customer's message (and every earlier one) as read, so they see
+ * blue ticks. With `typing`, WhatsApp also shows a typing indicator.
+ *
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators
+ */
+export async function markMessageRead(args: MarkMessageReadArgs): Promise<void> {
+  const { phoneNumberId, accessToken, messageId, typing } = args
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    status: 'read',
+    message_id: messageId,
+  }
+  if (typing) body.typing_indicator = { type: 'text' }
+
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Mark as read failed: ${response.status}`)
+  }
 }
 
 // ============================================================

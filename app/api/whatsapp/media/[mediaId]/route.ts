@@ -45,7 +45,8 @@ export async function GET(
       status: 200,
       headers: {
         'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
+        // Customer media sits behind login: never let shared caches keep it.
+        'Cache-Control': 'private, max-age=86400',
       },
     })
   } catch (error) {
