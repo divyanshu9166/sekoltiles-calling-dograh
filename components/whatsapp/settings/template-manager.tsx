@@ -26,10 +26,25 @@ import {
 } from '@/components/ui/select';
 import type { MessageTemplate } from '@/types';
 import { TEMPLATE_LIMITS, type TemplateButtonInput } from '@/lib/whatsapp/template-submission';
+import {
+  checkTemplateSubmission,
+  EMPTY_SAMPLES,
+  hasSampleNeeds,
+  sampleNeeds,
+  templateSubmitFormData,
+  type TemplateDraft,
+  type TemplateSamples,
+} from '@/lib/whatsapp/template-samples';
 import { TemplateSubmitDialog } from './template-submit-dialog';
+import { TemplateSampleFields } from './template-sample-fields';
 
 const CATEGORIES = ['Marketing', 'Utility', 'Authentication'] as const;
 const HEADER_TYPES = ['text', 'image', 'video', 'document'] as const;
+// Labels for the selected value too; without them the box shows "video".
+const HEADER_TYPE_ITEMS = [
+  { value: 'none', label: 'None' },
+  ...HEADER_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
+];
 const BUTTON_TYPES: { value: TemplateButtonInput['type']; label: string }[] = [
   { value: 'QUICK_REPLY', label: 'Quick reply' },
   { value: 'URL', label: 'Visit website' },
@@ -113,6 +128,9 @@ export function TemplateManager() {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
+  const [samples, setSamples] = useState<TemplateSamples>(EMPTY_SAMPLES);
+  const [formError, setFormError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [submitTarget, setSubmitTarget] = useState<MessageTemplate | null>(null);
 
   const fetchTemplates = useCallback(async () => {
@@ -144,59 +162,143 @@ export function TemplateManager() {
     fetchTemplates();
   }, [authLoading, user, fetchTemplates]);
 
+  /** What gets stored, trimmed the same way for both buttons. */
+  function draftFromForm(): TemplateDraft {
+    return {
+      name: form.name.trim(),
+      category: form.category,
+      language: form.language.trim() || 'en_US',
+      body_text: form.body_text.trim(),
+      header_type: form.header_type && form.header_type !== 'none' ? form.header_type : null,
+      header_content: form.header_type === 'text' ? form.header_content.trim() || null : null,
+      footer_text: form.footer_text.trim() || null,
+      buttons: form.buttons.map((b) => ({
+        type: b.type,
+        text: b.text.trim(),
+        ...(b.type === 'URL' ? { url: (b.url ?? '').trim() } : {}),
+        ...(b.type === 'PHONE_NUMBER' ? { phone_number: (b.phone_number ?? '').trim() } : {}),
+      })),
+    };
+  }
+
+  function openNewTemplate() {
+    setForm(emptyForm);
+    setSamples(EMPTY_SAMPLES);
+    setFormError('');
+    setDialogOpen(true);
+  }
+
+  function closeNewTemplate() {
+    setDialogOpen(false);
+    setForm(emptyForm);
+    setSamples(EMPTY_SAMPLES);
+    setFormError('');
+  }
+
+  async function createDraft(draft: TemplateDraft): Promise<MessageTemplate> {
+    const res = await fetch('/api/whatsapp/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...draft, status: 'Draft' as const }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || 'Failed to create template');
+    return data.data as MessageTemplate;
+  }
+
+  function basicProblem(): string | null {
+    if (!form.name.trim()) return 'Template name is required';
+    if (!form.body_text.trim()) return 'Body text is required';
+    return null;
+  }
+
   async function handleSave() {
-    if (!form.name.trim()) {
-      toast.error('Template name is required');
+    const problem = basicProblem();
+    if (problem) {
+      toast.error(problem);
       return;
     }
-    if (!form.body_text.trim()) {
-      toast.error('Body text is required');
+    if (!user) {
+      toast.error('Not authenticated');
       return;
     }
 
     try {
       setSaving(true);
-      if (!user) {
-        toast.error('Not authenticated');
-        return;
-      }
-
-      const payload = {
-        name: form.name.trim(),
-        category: form.category,
-        language: form.language.trim() || 'en_US',
-        body_text: form.body_text.trim(),
-        header_type: form.header_type || null,
-        header_content: form.header_type === 'text' ? form.header_content.trim() || null : null,
-        footer_text: form.footer_text.trim() || null,
-        buttons: form.buttons.map((b) => ({
-          type: b.type,
-          text: b.text.trim(),
-          ...(b.type === 'URL' ? { url: (b.url ?? '').trim() } : {}),
-          ...(b.type === 'PHONE_NUMBER' ? { phone_number: (b.phone_number ?? '').trim() } : {}),
-        })),
-        status: 'Draft' as const,
-      };
-
-      const res = await fetch('/api/whatsapp/templates', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || 'Failed to create template');
-      }
-
-      toast.success('Template created successfully');
-      setDialogOpen(false);
-      setForm(emptyForm);
-      if (user) await fetchTemplates();
+      await createDraft(draftFromForm());
+      toast.success('Template saved as a draft');
+      closeNewTemplate();
+      await fetchTemplates();
     } catch (err) {
       console.error('Save error:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to create template');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /**
+   * Save the template and send it to Meta for review in one go, like
+   * WhatsApp Manager. If Meta refuses it, the just-saved draft is removed
+   * again so the form can be fixed and retried without a duplicate row.
+   */
+  async function handleSaveAndSubmit() {
+    setFormError('');
+    const problem = basicProblem();
+    if (problem) {
+      setFormError(problem);
+      return;
+    }
+    if (!user) {
+      toast.error('Not authenticated');
+      return;
+    }
+    const draft = draftFromForm();
+    try {
+      checkTemplateSubmission(draft, samples);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Check the template and try again.');
+      return;
+    }
+
+    setSubmitting(true);
+    let created: MessageTemplate | null = null;
+    try {
+      created = await createDraft(draft);
+      const res = await fetch(`/api/whatsapp/templates/${created.id}/submit`, {
+        method: 'POST',
+        body: templateSubmitFormData(draft, samples),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && res.status >= 500 && res.status !== 502) {
+        // Our server failed after the request may have reached Meta.
+        throw new Error(data?.error || `Submission failed (HTTP ${res.status})`);
+      }
+      if (!res.ok) {
+        // Meta (502) or our checks (4xx) refused it: drop the draft so a
+        // retry doesn't leave a second copy behind.
+        await fetch(`/api/whatsapp/templates/${created.id}`, { method: 'DELETE' }).catch(() => {});
+        setFormError(data?.error || `Submission failed (HTTP ${res.status})`);
+        return;
+      }
+      toast.success(`${data?.data?.name ?? draft.name} sent to Meta for review`);
+      if (data?.data?.category && data.data.category !== draft.category) {
+        toast.info(`Meta filed it as ${data.data.category}, not ${draft.category}.`);
+      }
+      closeNewTemplate();
+      await fetchTemplates();
+    } catch (err) {
+      console.error('Save & submit error:', err);
+      if (created) {
+        // The draft is saved but we don't know whether Meta got it.
+        toast.error('Saved as a draft, but the submission did not finish. Check its status, or Sync from Meta.');
+        closeNewTemplate();
+        await fetchTemplates();
+      } else {
+        setFormError(err instanceof Error ? err.message : 'Failed to create template');
+      }
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -267,6 +369,13 @@ export function TemplateManager() {
     }
   }
 
+  const formNeeds = sampleNeeds({
+    header_type: form.header_type,
+    header_content: form.header_content,
+    body_text: form.body_text,
+    buttons: form.buttons,
+  });
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -302,10 +411,7 @@ export function TemplateManager() {
             <span className="xs:hidden">{syncing ? '…' : 'Sync'}</span>
           </Button>
           <Button
-            onClick={() => {
-              setForm(emptyForm);
-              setDialogOpen(true);
-            }}
+            onClick={openNewTemplate}
             size="sm"
             className="bg-accent hover:bg-accent-hover text-white text-xs sm:text-sm"
           >
@@ -389,12 +495,12 @@ export function TemplateManager() {
       )}
 
       {/* New Template Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => !submitting && (open ? setDialogOpen(true) : closeNewTemplate())}>
         <DialogContent className="bg-surface border-border sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground">New Message Template</DialogTitle>
             <DialogDescription className="text-muted">
-              Create a new WhatsApp message template.
+              Save it as a draft, or save and send it to Meta for review in one step.
             </DialogDescription>
           </DialogHeader>
 
@@ -458,7 +564,12 @@ export function TemplateManager() {
               <Label className="text-foreground text-xs sm:text-sm">Header Type</Label>
               <Select
                 value={form.header_type}
-                onValueChange={(val) => setForm({ ...form, header_type: val || '' })}
+                items={HEADER_TYPE_ITEMS}
+                onValueChange={(val) => {
+                  setForm({ ...form, header_type: val || '' });
+                  // A sample picked for another header type no longer fits.
+                  setSamples({ ...samples, file: null });
+                }}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="None" />
@@ -474,11 +585,6 @@ export function TemplateManager() {
                   ))}
                 </SelectContent>
               </Select>
-              {(form.header_type === 'image' || form.header_type === 'video' || form.header_type === 'document') && (
-                <p className="text-[10px] sm:text-[11px] text-muted">
-                  You&apos;ll attach a sample file when you submit it to Meta.
-                </p>
-              )}
             </div>
 
             {form.header_type === 'text' && (
@@ -590,28 +696,77 @@ export function TemplateManager() {
                 );
               })}
             </div>
+
+            {hasSampleNeeds(formNeeds) && (
+              <div className="space-y-3 rounded-md border border-border p-3">
+                <div>
+                  <p className="text-foreground text-xs sm:text-sm font-medium">Samples for Meta&apos;s review</p>
+                  <p className="text-[10px] sm:text-[11px] text-muted">
+                    Needed for &quot;Save &amp; Submit to Meta&quot;. Meta checks the template with these; customers never
+                    see them.
+                  </p>
+                </div>
+                <TemplateSampleFields
+                  needs={formNeeds}
+                  buttons={form.buttons}
+                  samples={samples}
+                  onChange={setSamples}
+                  disabled={submitting}
+                />
+              </div>
+            )}
+
+            {formError && (
+              <p role="alert" className="rounded-md border border-red-600/30 bg-red-600/10 px-3 py-2 text-xs text-red-400">
+                {formError}
+              </p>
+            )}
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
               variant="outline"
-              onClick={() => setDialogOpen(false)}
+              onClick={closeNewTemplate}
+              disabled={submitting}
               className="border-border text-foreground hover:bg-surface-light"
             >
               Cancel
             </Button>
             <Button
+              variant="outline"
               onClick={handleSave}
-              disabled={saving}
-              className="bg-accent hover:bg-accent-hover text-white"
+              disabled={saving || submitting}
+              className="border-border text-foreground hover:bg-surface-light"
             >
               {saving ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Creating...
+                  Saving…
                 </>
               ) : (
-                'Create Template'
+                'Save as Draft'
+              )}
+            </Button>
+            <Button
+              onClick={handleSaveAndSubmit}
+              disabled={saving || submitting || form.category === 'Authentication'}
+              title={
+                form.category === 'Authentication'
+                  ? 'Authentication templates must be created in WhatsApp Manager'
+                  : 'Save this template and send it to Meta for approval'
+              }
+              className="bg-accent hover:bg-accent-hover text-white"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Submitting…
+                </>
+              ) : (
+                <>
+                  <Send className="size-4" />
+                  Save &amp; Submit to Meta
+                </>
               )}
             </Button>
           </DialogFooter>

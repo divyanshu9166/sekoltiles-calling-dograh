@@ -192,6 +192,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const accessToken = decrypt(config.access_token)
 
+  let created: Awaited<ReturnType<typeof createMessageTemplate>>
   try {
     let handle = ''
     if (sample && input.file) {
@@ -205,12 +206,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }))
     }
 
-    const created = await createMessageTemplate({
+    created = await createMessageTemplate({
       wabaId: config.waba_id,
       accessToken,
       payload: { ...buildArgs(headerFor(handle)) },
     })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+    console.error('[whatsapp/templates/submit] Meta rejected the submission:', message)
+    return NextResponse.json({ error: `Meta did not accept the template: ${message}` }, { status: 502 })
+  }
 
+  // Meta has the template now; a failure past this point must not read as a
+  // rejection (the New Template form deletes the draft on a 502).
+  try {
     const updated = await prisma.waMessageTemplate.update({
       where: { id: template.id },
       data: {
@@ -238,8 +247,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       },
     })
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown Meta API error'
-    console.error('[whatsapp/templates/submit] Meta rejected the submission:', message)
-    return NextResponse.json({ error: `Meta did not accept the template: ${message}` }, { status: 502 })
+    console.error('[whatsapp/templates/submit] Meta accepted the template but saving it failed:', err)
+    return NextResponse.json(
+      { error: `Meta accepted the template (ID ${created.id}) but saving it here failed. Run "Sync from Meta".` },
+      { status: 500 },
+    )
   }
 }

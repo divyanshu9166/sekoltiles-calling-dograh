@@ -120,11 +120,6 @@ export function toMetaCategory(category: string): TemplateSubmitCategory | null 
 }
 
 /**
- * Meta rejects variables that first appear out of order, so "Hi {{2}}, order
- * {{1}}" fails even though both numbers exist. `vars` is in order of first
- * appearance (templateVariables); a later repeat of an earlier one is fine.
- */
-/**
  * Meta's category back in the CRM's TitleCase. Meta may move a Utility
  * template to Marketing when it is submitted; null when it sends none.
  */
@@ -141,6 +136,11 @@ export function fromMetaCategory(category: string | null | undefined): 'Marketin
   }
 }
 
+/**
+ * Meta rejects variables that first appear out of order, so "Hi {{2}}, order
+ * {{1}}" fails even though both numbers exist. `vars` is in order of first
+ * appearance (templateVariables); a later repeat of an earlier one is fine.
+ */
 function checkSequential(label: string, vars: number[]) {
   vars.forEach((n, i) => {
     if (n !== i + 1) {
