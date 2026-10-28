@@ -176,13 +176,25 @@ export interface TemplateComponentParams {
   header?: string[]
   /** Variables for the BODY component (e.g. {{1}}, {{2}} in the body) — most common */
   body?: string[]
-  /** Variables for BUTTON components (e.g. dynamic URL suffixes) */
-  buttons?: Array<{ index: number; sub_type: 'url' | 'quick_reply'; value: string }>
+  /**
+   * Variables for BUTTON components: a website button's URL suffix, a quick
+   * reply's payload, or the code a Copy offer code button copies.
+   */
+  buttons?: Array<{ index: number; sub_type: 'url' | 'quick_reply' | 'copy_code'; value: string }>
+  /** Pin for a template with a LOCATION header, chosen per send. */
+  headerLocation?: TemplateHeaderLocation
   /**
    * Photo, video or document for a template with a media HEADER. Meta
    * rejects (#132012) a media-header template sent without one.
    */
   headerMedia?: TemplateHeaderMedia
+}
+
+export interface TemplateHeaderLocation {
+  latitude: number
+  longitude: number
+  name?: string
+  address?: string
 }
 
 export interface TemplateHeaderMedia {
@@ -249,6 +261,22 @@ export async function sendTemplateMessage(
       const media: Record<string, string> = { id }
       if (type === 'document' && filename) media.filename = filename
       components.push({ type: 'header', parameters: [{ type, [type]: media }] })
+    } else if (componentParams.headerLocation) {
+      const { latitude, longitude, name, address } = componentParams.headerLocation
+      components.push({
+        type: 'header',
+        parameters: [
+          {
+            type: 'location',
+            location: {
+              latitude: String(latitude),
+              longitude: String(longitude),
+              ...(name ? { name } : {}),
+              ...(address ? { address } : {}),
+            },
+          },
+        ],
+      })
     } else if (componentParams.header && componentParams.header.length > 0) {
       components.push({
         type: 'header',
@@ -270,7 +298,9 @@ export async function sendTemplateMessage(
           parameters: [
             btn.sub_type === 'url'
               ? { type: 'text', text: btn.value }
-              : { type: 'payload', payload: btn.value },
+              : btn.sub_type === 'copy_code'
+                ? { type: 'coupon_code', coupon_code: btn.value }
+                : { type: 'payload', payload: btn.value },
           ],
         })
       }

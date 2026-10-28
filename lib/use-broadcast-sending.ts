@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { MessageTemplate } from '@/types';
 import type { VariableMapping } from '@/lib/whatsapp/broadcast-variables';
+import type { TemplateSendExtras } from '@/lib/whatsapp/template-send-extras';
 
 export type { VariableMapping };
 
@@ -30,6 +31,8 @@ interface BroadcastPayload {
   variables: Record<string, VariableMapping>;
   /** Uploaded photo/video/PDF for a template with a media header. */
   headerMedia?: { type: 'image' | 'video' | 'document'; id: string; filename?: string };
+  /** Header {{1}}, location pin, link endings and offer code for every recipient. */
+  extras?: TemplateSendExtras;
   /** Send later instead of now. */
   scheduledAt?: Date;
 }
@@ -59,6 +62,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
           audience: payload.audience,
           variables: payload.variables,
           ...(payload.headerMedia ? { header_media: payload.headerMedia } : {}),
+          ...(payload.extras ? { template_extras: payload.extras } : {}),
           ...(payload.scheduledAt ? { scheduled_at: payload.scheduledAt.toISOString() } : {}),
         }),
       });

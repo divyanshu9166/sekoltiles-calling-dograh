@@ -26,6 +26,7 @@ import {
 import { format, isToday, isYesterday, isValid } from "date-fns";
 import { customerSession, mergeInboxMessages, templatePickerProblem } from "@/lib/whatsapp/inbox-state";
 import type { HeaderMediaUpload } from "@/lib/whatsapp/use-template-header-upload";
+import type { TemplateSendExtras } from "@/lib/whatsapp/template-send-extras";
 import { checkOutboundMedia, mediaMessageText } from "@/lib/whatsapp/outbound-media";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -535,7 +536,7 @@ export function MessageThread({
   }, []);
 
   const handleSendTemplate = useCallback(
-    async (template: MessageTemplate, params: string[], headerMedia?: HeaderMediaUpload) => {
+    async (template: MessageTemplate, params: string[], headerMedia?: HeaderMediaUpload, extras?: TemplateSendExtras) => {
       if (!conversation) return false;
       const problem = templatePickerProblem(template);
       if (problem) { toast.error(problem); return false; }
@@ -570,6 +571,7 @@ export function MessageThread({
             ...(headerMedia
               ? { header_media: { type: headerMedia.type, id: headerMedia.id, filename: headerMedia.filename } }
               : {}),
+            ...(extras ? { template_extras: extras } : {}),
             content_text: renderedBody,
           }),
         });

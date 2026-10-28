@@ -24,6 +24,7 @@ import {
 } from '@/lib/whatsapp/phone-utils'
 import { describeStatusErrors } from '@/lib/whatsapp/delivery-errors'
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
+import { parseStoredSendParams } from '@/lib/whatsapp/template-send-extras'
 import { parseVariableMappings, resolveVariables } from '@/lib/whatsapp/broadcast-variables'
 
 // ── Store ──────────────────────────────────────────────────────────────────
@@ -36,6 +37,8 @@ export interface BroadcastRecord {
   template_language: string
   template_variables: unknown
   header_media: unknown
+  /** Header/button send parameters shared by every recipient. */
+  template_extras?: unknown
   scheduled_at: Date | null
 }
 
@@ -300,6 +303,8 @@ export async function processBroadcast(
 
   const variables = parseVariableMappings(broadcast.template_variables)
   const headerMedia = parseHeaderMedia(broadcast.header_media)
+  const extrasParams = parseStoredSendParams(broadcast.template_extras)
+  const useComponents = !!headerMedia || Object.keys(extrasParams).length > 0
   const language = broadcast.template_language || 'en_US'
   const templateBody = await store.getTemplateBody(broadcast.user_id, broadcast.template_name, language)
 
@@ -356,7 +361,9 @@ export async function processBroadcast(
           accessToken: config.accessToken,
           templateName: broadcast.template_name,
           language,
-          ...(headerMedia ? { componentParams: { body: params, headerMedia } } : { params }),
+          ...(useComponents
+            ? { componentParams: { body: params, ...(headerMedia ? { headerMedia } : {}), ...extrasParams } }
+            : { params }),
         })
         await store.markSent(recipient.id, messageId)
         result.sent++

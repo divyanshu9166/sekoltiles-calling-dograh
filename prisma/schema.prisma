@@ -542,6 +542,9 @@ model WaBroadcast {
   audience_filter  Json?
   /// Photo/video/PDF for a media-header template: { type, id, filename? }.
   header_media     Json?
+  /// Same for every recipient: header {{1}}, location pin, link endings and
+  /// offer code, stored as the send request's header/button parameters.
+  template_extras  Json?
   scheduled_at     DateTime?
   /// draft | scheduled | sending | sent | failed | cancelled
   status           String   @default("draft")

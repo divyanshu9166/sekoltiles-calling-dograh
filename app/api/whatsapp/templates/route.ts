@@ -5,7 +5,7 @@ import { parseStoredButtons } from '@/lib/whatsapp/template-submission'
 
 const CATEGORY_VALUES = new Set(['Marketing', 'Utility', 'Authentication'])
 const STATUS_VALUES = new Set(['Draft', 'Pending', 'Approved', 'Rejected'])
-const HEADER_TYPES = new Set(['text', 'image', 'video', 'document'])
+const HEADER_TYPES = new Set(['text', 'image', 'video', 'document', 'location'])
 
 function serializeTemplate(template: {
     id: string

@@ -16,6 +16,7 @@ import {
 } from '@/lib/whatsapp/outbound-media'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
+import { parseSendExtras, sendExtrasComponentParams, type TemplateSendExtras } from '@/lib/whatsapp/template-send-extras'
 import {
   normalizePhoneForMetaIndia,
   isValidE164,
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
     let template_params: string[] | undefined
     let template_language: string | undefined
     let header_media: unknown
+    let template_extras: unknown
     let reply_to_message_id: string | undefined
     let upload: { file: Blob; kind: OutboundMediaKind; mimeType: string; filename: string } | null = null
 
@@ -104,6 +106,7 @@ export async function POST(request: Request) {
         template_params,
         template_language,
         header_media,
+        template_extras,
         reply_to_message_id,
       } = body)
     }
@@ -134,6 +137,22 @@ export async function POST(request: Request) {
     const headerMedia = message_type === 'template' ? parseHeaderMedia(header_media) : null
     if (message_type === 'template' && header_media && !headerMedia) {
       return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
+    }
+
+    // Header {{1}}, location pin, link suffixes and offer code, checked
+    // against the stored template so the button positions are Meta's.
+    let templateExtras: TemplateSendExtras | null = null
+    let templateShape: { header_type: string | null; header_content: string | null; buttons: unknown } | null = null
+    if (message_type === 'template' && template_name) {
+      templateShape = await prisma.waMessageTemplate.findFirst({
+        where: { user_id: userId, name: template_name, ...(template_language ? { language: template_language } : {}) },
+        select: { header_type: true, header_content: true, buttons: true },
+      })
+      if (templateShape) {
+        const parsed = parseSendExtras(templateShape, template_extras)
+        if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+        templateExtras = parsed.extras
+      }
     }
 
     // Fetch conversation and contact
@@ -269,9 +288,11 @@ export async function POST(request: Request) {
           to: phone,
           templateName: template_name ?? '',
           language: template_language || undefined,
-          ...(headerMedia
-            ? { componentParams: { body: template_params || [], headerMedia } }
-            : { params: template_params || [] }),
+          componentParams: {
+            body: template_params || [],
+            ...(headerMedia ? { headerMedia } : {}),
+            ...(templateShape ? sendExtrasComponentParams(templateShape, templateExtras) : {}),
+          },
           contextMessageId,
         })
         return result.messageId

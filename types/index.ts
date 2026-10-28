@@ -127,7 +127,7 @@ export interface MessageTemplate {
   name: string;
   category: 'Marketing' | 'Utility' | 'Authentication';
   language?: string;
-  header_type?: 'text' | 'image' | 'video' | 'document';
+  header_type?: 'text' | 'image' | 'video' | 'document' | 'location';
   header_content?: string;
   body_text: string;
   footer_text?: string;

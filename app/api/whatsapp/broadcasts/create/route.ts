@@ -5,6 +5,7 @@ import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import { enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'
 import { parseScheduledAt } from '@/lib/whatsapp/broadcast-schedule'
+import { parseSendExtras, sendExtrasComponentParams } from '@/lib/whatsapp/template-send-extras'
 
 export async function POST(request: Request) {
   try {
@@ -27,6 +28,19 @@ export async function POST(request: Request) {
     const headerMedia = parseHeaderMedia(payload.header_media)
     if (payload.header_media && !headerMedia) {
       return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
+    }
+
+    // Header {{1}}, location pin, link endings and offer code: checked against
+    // the stored template now, so every recipient gets valid parameters.
+    const templateRow = await prisma.waMessageTemplate.findFirst({
+      where: { user_id: userId, name: template.name, language: template.language ?? 'en_US' },
+      select: { header_type: true, header_content: true, buttons: true },
+    })
+    let templateExtras: ReturnType<typeof sendExtrasComponentParams> = {}
+    if (templateRow) {
+      const parsed = parseSendExtras(templateRow, payload.template_extras)
+      if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+      templateExtras = sendExtrasComponentParams(templateRow, parsed.extras)
     }
 
     const schedule = parseScheduledAt(payload.scheduled_at, Date.now(), { hasHeaderMedia: !!headerMedia })
@@ -137,6 +151,7 @@ export async function POST(request: Request) {
         template_variables: variables ?? {},
         audience_filter: audience,
         ...(headerMedia ? { header_media: { ...headerMedia } } : {}),
+        ...(Object.keys(templateExtras).length ? { template_extras: JSON.parse(JSON.stringify(templateExtras)) } : {}),
         scheduled_at: scheduledAt,
         status: scheduledAt ? 'scheduled' : 'sending',
         total_recipients: contacts.length,

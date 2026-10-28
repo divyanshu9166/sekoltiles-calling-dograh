@@ -33,7 +33,11 @@ export function customerSession(messages: Message[], now = Date.now()) {
 }
 
 export function templatePickerProblem(template: MessageTemplate): string | null {
-  if (template.header_content?.includes('{{') || template.buttons?.some(button => JSON.stringify(button).includes('{{') || button.type === 'OTP')) return 'This template needs header/button parameters. Use a body-only template in this picker.'
+  // Header {{1}}, link suffixes, offer codes and location pins are asked for
+  // in the picker (template-send-extras). One-time-password templates need a
+  // code generated per customer, so they can't be sent by hand.
+  if (template.category === 'Authentication' || template.buttons?.some(button => String(button.type).toUpperCase() === 'OTP')) return 'One-time-password templates can only be sent by your app.'
+  if (template.header_type === 'text' && (template.header_content?.match(/\{\{/g)?.length ?? 0) > 1) return 'Template headers can have only one variable.'
   const tokens = [...template.body_text.matchAll(/\{\{\s*([^}]+?)\s*\}\}/g)].map(match => match[1].trim())
   if (tokens.some(token => !/^[1-9]\d*$/.test(token))) return 'Named template variables are not supported by this picker.'
   const ids = [...new Set(tokens.map(Number))].sort((a, b) => a - b)

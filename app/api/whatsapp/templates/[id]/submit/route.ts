@@ -177,6 +177,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (isMediaHeaderType(headerType)) {
       return { format: headerType.toUpperCase() as 'IMAGE' | 'VIDEO' | 'DOCUMENT', handle }
     }
+    if (headerType === 'location') return { format: 'LOCATION' }
     return null
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, Trash2, Loader2, RefreshCw, Send, X } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -37,18 +37,16 @@ import {
 } from '@/lib/whatsapp/template-samples';
 import { TemplateSubmitDialog } from './template-submit-dialog';
 import { TemplateSampleFields } from './template-sample-fields';
+import { TemplateButtonEditor } from './template-button-editor';
+import { TemplateTextToolbar } from './template-text-toolbar';
+import { TemplatePreview } from './template-preview';
 
 const CATEGORIES = ['Marketing', 'Utility', 'Authentication'] as const;
-const HEADER_TYPES = ['text', 'image', 'video', 'document'] as const;
+const HEADER_TYPES = ['text', 'image', 'video', 'document', 'location'] as const;
 // Labels for the selected value too; without them the box shows "video".
 const HEADER_TYPE_ITEMS = [
   { value: 'none', label: 'None' },
   ...HEADER_TYPES.map((type) => ({ value: type, label: type.charAt(0).toUpperCase() + type.slice(1) })),
-];
-const BUTTON_TYPES: { value: TemplateButtonInput['type']; label: string }[] = [
-  { value: 'QUICK_REPLY', label: 'Quick reply' },
-  { value: 'URL', label: 'Visit website' },
-  { value: 'PHONE_NUMBER', label: 'Call phone number' },
 ];
 
 const categoryColors: Record<string, string> = {
@@ -132,6 +130,8 @@ export function TemplateManager() {
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitTarget, setSubmitTarget] = useState<MessageTemplate | null>(null);
+  const headerTextRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const fetchTemplates = useCallback(async () => {
     try {
@@ -174,9 +174,13 @@ export function TemplateManager() {
       footer_text: form.footer_text.trim() || null,
       buttons: form.buttons.map((b) => ({
         type: b.type,
-        text: b.text.trim(),
+        text: b.type === 'COPY_CODE' ? '' : b.text.trim(),
         ...(b.type === 'URL' ? { url: (b.url ?? '').trim() } : {}),
         ...(b.type === 'PHONE_NUMBER' ? { phone_number: (b.phone_number ?? '').trim() } : {}),
+        ...(b.type === 'COPY_CODE' ? { example: (b.example ?? '').trim() } : {}),
+        ...(b.type === 'FLOW'
+          ? { flow_id: (b.flow_id ?? '').trim(), ...(b.navigate_screen?.trim() ? { navigate_screen: b.navigate_screen.trim() } : {}) }
+          : {}),
       })),
     };
   }
@@ -496,7 +500,7 @@ export function TemplateManager() {
 
       {/* New Template Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => !submitting && (open ? setDialogOpen(true) : closeNewTemplate())}>
-        <DialogContent className="bg-surface border-border sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-surface border-border sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground">New Message Template</DialogTitle>
             <DialogDescription className="text-muted">
@@ -504,7 +508,8 @@ export function TemplateManager() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3.5 py-2">
+          <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-3.5 py-2 min-w-0">
             <div className="space-y-1.5">
               <Label className="text-foreground text-xs sm:text-sm">Template Name</Label>
               <Input
@@ -585,12 +590,28 @@ export function TemplateManager() {
                   ))}
                 </SelectContent>
               </Select>
+              {form.header_type === 'location' && (
+                <p className="text-[10px] sm:text-[11px] text-muted">
+                  A map pin at the top of the message. You choose the place each time you send. Marketing and Utility
+                  only.
+                </p>
+              )}
             </div>
 
             {form.header_type === 'text' && (
               <div className="space-y-1.5">
-                <Label className="text-foreground text-xs sm:text-sm">Header Text</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-foreground text-xs sm:text-sm">Header Text</Label>
+                  <TemplateTextToolbar
+                    fieldRef={headerTextRef}
+                    value={form.header_content}
+                    onChange={(header_content) => setForm({ ...form, header_content })}
+                    formatting={false}
+                    maxVariables={1}
+                  />
+                </div>
                 <Input
+                  ref={headerTextRef}
                   placeholder="Up to 60 characters. One variable, {{1}}, allowed."
                   maxLength={TEMPLATE_LIMITS.headerText}
                   value={form.header_content}
@@ -600,14 +621,26 @@ export function TemplateManager() {
             )}
 
             <div className="space-y-1.5">
-              <Label className="text-foreground text-xs sm:text-sm">Body Text</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-foreground text-xs sm:text-sm">Body Text</Label>
+                <TemplateTextToolbar
+                  fieldRef={bodyRef}
+                  value={form.body_text}
+                  onChange={(body_text) => setForm({ ...form, body_text })}
+                />
+              </div>
               <Textarea
+                ref={bodyRef}
                 placeholder="Enter your template message body. Use {{1}}, {{2}} for variables."
                 value={form.body_text}
                 onChange={(e) => setForm({ ...form, body_text: e.target.value })}
-                rows={4}
-                className="resize-none"
+                rows={5}
+                maxLength={TEMPLATE_LIMITS.body}
+                className="resize-y"
               />
+              <p className="text-right text-[10px] text-muted">
+                {form.body_text.length}/{TEMPLATE_LIMITS.body}
+              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -620,82 +653,7 @@ export function TemplateManager() {
               />
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-foreground text-xs sm:text-sm">Buttons</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={form.buttons.length >= TEMPLATE_LIMITS.buttons}
-                  onClick={() => setForm({ ...form, buttons: [...form.buttons, { type: 'QUICK_REPLY', text: '' }] })}
-                  className="border-border bg-transparent text-foreground hover:bg-surface-light text-xs h-7"
-                >
-                  <Plus className="size-3.5" />
-                  Add button
-                </Button>
-              </div>
-              {form.buttons.length === 0 && (
-                <p className="text-[10px] sm:text-[11px] text-muted">
-                  Optional. Up to 10, with at most 2 website buttons and 1 call button.
-                </p>
-              )}
-              {form.buttons.map((button, i) => {
-                const update = (patch: Partial<TemplateButtonInput>) =>
-                  setForm({ ...form, buttons: form.buttons.map((b, j) => (j === i ? { ...b, ...patch } : b)) });
-                return (
-                  <div key={i} className="rounded-md border border-border p-2.5 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={button.type}
-                        onValueChange={(val) => update({ type: val as TemplateButtonInput['type'] })}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {BUTTON_TYPES.map((t) => (
-                            <SelectItem key={t.value} value={t.value}>
-                              {t.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setForm({ ...form, buttons: form.buttons.filter((_, j) => j !== i) })}
-                        className="text-muted hover:text-red-500 shrink-0 size-8"
-                        title="Remove button"
-                      >
-                        <X className="size-4" />
-                      </Button>
-                    </div>
-                    <Input
-                      placeholder="Button label (up to 25 characters)"
-                      maxLength={TEMPLATE_LIMITS.buttonText}
-                      value={button.text}
-                      onChange={(e) => update({ text: e.target.value })}
-                    />
-                    {button.type === 'URL' && (
-                      <Input
-                        placeholder="https://example.com/page (may end in {{1}})"
-                        value={button.url ?? ''}
-                        onChange={(e) => update({ url: e.target.value })}
-                      />
-                    )}
-                    {button.type === 'PHONE_NUMBER' && (
-                      <Input
-                        placeholder="Phone with country code, e.g. 919876543210"
-                        value={button.phone_number ?? ''}
-                        onChange={(e) => update({ phone_number: e.target.value })}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <TemplateButtonEditor buttons={form.buttons} onChange={(buttons) => setForm({ ...form, buttons })} />
 
             {hasSampleNeeds(formNeeds) && (
               <div className="space-y-3 rounded-md border border-border p-3">
@@ -721,6 +679,20 @@ export function TemplateManager() {
                 {formError}
               </p>
             )}
+          </div>
+
+          <div className="py-2 lg:sticky lg:top-0 lg:self-start">
+            <TemplatePreview
+              headerType={form.header_type}
+              headerText={form.header_content}
+              body={form.body_text}
+              footer={form.footer_text}
+              buttons={form.buttons}
+              headerExample={samples.headerExample}
+              bodyExamples={samples.bodyExamples}
+              sampleFile={samples.file}
+            />
+          </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">

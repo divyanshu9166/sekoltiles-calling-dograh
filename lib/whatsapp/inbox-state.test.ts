@@ -47,11 +47,12 @@ test('24-hour window uses latest valid customer timestamp, not array order or ag
 test('future timestamp clock skew does not extend session beyond 24 hours', () => {
  assert.equal(customerSession([message('future',{sender_type:'customer'})],Date.parse('2026-10-07T00:00:00Z')).remaining,'24h 0m remaining')
 })
-test('template picker refuses unresolved header/media/named/noncontiguous variables', () => {
+test('template picker refuses named/noncontiguous variables and OTP, allows header/link values it asks for', () => {
  const t: MessageTemplate={id:'t',user_id:'u',name:'t',body_text:'Hello {{ 1 }}, {{2}} and {{1}}',category:'Utility',created_at:''}
  assert.equal(templatePickerProblem(t),null)
  assert.equal(templatePickerProblem({...t,header_type:'image'}),null)
- for(const overrides of [{header_type:'text' as const,header_content:'{{1}}'},{body_text:'{{2}}'},{body_text:'{{name}}'},{buttons:[{type:'URL',url:'https://example.com/{{1}}'}]}])assert.ok(templatePickerProblem({...t,...overrides}))
+ for(const overrides of [{header_type:'text' as const,header_content:'Hi {{1}}'},{header_type:'location' as const},{buttons:[{type:'URL',url:'https://example.com/{{1}}'}]},{buttons:[{type:'COPY_CODE'}]}])assert.equal(templatePickerProblem({...t,...overrides}),null)
+ for(const overrides of [{body_text:'{{2}}'},{body_text:'{{name}}'},{buttons:[{type:'OTP'}]}])assert.ok(templatePickerProblem({...t,...overrides}))
 })
 test('actual outgoing bubble has semantic contrast classes, no nested percentage width', () => {
  const html=renderBubble({message:message('out')})

@@ -13,6 +13,13 @@ import {
 } from '@/components/ui/select';
 import { ArrowLeft, ArrowRight, Eye, Loader2, Paperclip } from 'lucide-react';
 import type { useTemplateHeaderUpload } from '@/lib/whatsapp/use-template-header-upload';
+import {
+  hasSendNeeds,
+  sendExtrasProblem,
+  templateSendNeeds,
+  type TemplateSendExtras,
+} from '@/lib/whatsapp/template-send-extras';
+import { TemplateSendExtrasFields } from '@/components/whatsapp/template-send-extras-fields';
 
 type VariableType = 'static' | 'field' | 'custom_field';
 
@@ -27,6 +34,9 @@ interface Step3Props {
   onUpdate: (variables: Record<string, VariableMapping>) => void;
   /** Upload state for a template with a photo, video or PDF header. */
   headerUpload: ReturnType<typeof useTemplateHeaderUpload>;
+  /** Header {{1}}, location pin, link endings and offer code. */
+  extras: TemplateSendExtras;
+  onExtrasChange: (extras: TemplateSendExtras) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -57,9 +67,13 @@ export function Step3Personalize({
   variables,
   onUpdate,
   headerUpload,
+  extras,
+  onExtrasChange,
   onNext,
   onBack,
 }: Step3Props) {
+  const sendNeeds = templateSendNeeds(template);
+  const extrasProblem = sendExtrasProblem(sendNeeds, extras);
   const headerType =
     template.header_type === 'image' || template.header_type === 'video' || template.header_type === 'document'
       ? template.header_type
@@ -312,6 +326,14 @@ export function Step3Personalize({
         </div>
       )}
 
+      {hasSendNeeds(sendNeeds) && (
+        <div className="glass-card space-y-2 p-4">
+          <p className="text-sm font-medium text-foreground">Template values</p>
+          <p className="text-xs text-muted">Every recipient gets these values.</p>
+          <TemplateSendExtrasFields needs={sendNeeds} extras={extras} onChange={onExtrasChange} />
+        </div>
+      )}
+
       {headerType && (
         <div className="glass-card space-y-2 p-4">
           <p className="text-sm font-medium text-foreground">Header {HEADER_LABEL[headerType]}</p>
@@ -395,7 +417,8 @@ export function Step3Personalize({
         </Button>
         <Button
           onClick={onNext}
-          disabled={unmappedKeys.length > 0 || headerMissing}
+          disabled={unmappedKeys.length > 0 || headerMissing || !!extrasProblem}
+          title={extrasProblem ?? undefined}
           className="bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
         >
           Next

@@ -17,6 +17,7 @@ export const prismaBroadcastStore: BroadcastStore = {
         template_language: true,
         template_variables: true,
         header_media: true,
+        template_extras: true,
         scheduled_at: true,
       },
     })

@@ -78,6 +78,8 @@ function submitArgs(draft: TemplateDraft, samples: TemplateSamples, handle: stri
     header = { format: 'TEXT', text: draft.header_content ?? '', example: samples.headerExample }
   } else if (mediaHeader) {
     header = { format: mediaHeader.toUpperCase() as 'IMAGE' | 'VIDEO' | 'DOCUMENT', handle }
+  } else if (draft.header_type === 'location') {
+    header = { format: 'LOCATION' }
   }
   return {
     name: toMetaTemplateName(draft.name),

@@ -23,11 +23,23 @@ import {
   Paperclip,
 } from "lucide-react";
 import { useTemplateHeaderUpload, type HeaderMediaUpload } from "@/lib/whatsapp/use-template-header-upload";
+import {
+  hasSendNeeds,
+  sendExtrasProblem,
+  templateSendNeeds,
+  type TemplateSendExtras,
+} from "@/lib/whatsapp/template-send-extras";
+import { TemplateSendExtrasFields } from "@/components/whatsapp/template-send-extras-fields";
 
 interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (template: MessageTemplate, params: string[], headerMedia?: HeaderMediaUpload) => Promise<boolean>;
+  onSelect: (
+    template: MessageTemplate,
+    params: string[],
+    headerMedia?: HeaderMediaUpload,
+    extras?: TemplateSendExtras,
+  ) => Promise<boolean>;
 }
 
 const HEADER_LABEL = { image: "photo", video: "video", document: "PDF" } as const;
@@ -72,6 +84,7 @@ export function TemplatePicker({
   const sendInFlight = useRef(false);
   const openGeneration = useRef(0);
   const header = useTemplateHeaderUpload();
+  const [extras, setExtras] = useState<TemplateSendExtras>({});
   useEffect(() => { openGeneration.current += 1; }, [open]);
 
   useEffect(() => {
@@ -111,18 +124,24 @@ export function TemplatePicker({
     if (!next) {
       setSelected(null);
       setParams([]);
+      setExtras({});
       header.reset();
     }
     onOpenChange(next);
   }
 
-  async function sendTemplate(template: MessageTemplate, values: string[], headerMedia?: HeaderMediaUpload) {
+  async function sendTemplate(
+    template: MessageTemplate,
+    values: string[],
+    headerMedia?: HeaderMediaUpload,
+    sendExtras?: TemplateSendExtras,
+  ) {
     if (sendInFlight.current) return;
     sendInFlight.current = true;
     const generation = openGeneration.current;
     setSending(true);
     try {
-      const accepted = await onSelect(template, values, headerMedia);
+      const accepted = await onSelect(template, values, headerMedia, sendExtras);
       if (generation !== openGeneration.current) return;
       if (accepted) handleOpenChange(false);
       else setLoadError('Template was not sent. Review the error before retrying.');
@@ -133,26 +152,30 @@ export function TemplatePicker({
   function pickTemplate(template: MessageTemplate) {
     if (sending || templatePickerProblem(template)) return;
     const vars = extractVariables(template.body_text);
-    if (vars.length === 0 && !mediaHeaderType(template)) {
+    if (vars.length === 0 && !mediaHeaderType(template) && !hasSendNeeds(templateSendNeeds(template))) {
       void sendTemplate(template, []);
       return;
     }
     header.reset();
+    setExtras({});
     setSelected(template);
     setParams(new Array(vars.length).fill(""));
   }
 
   function confirm() {
     if (!selected) return;
-    void sendTemplate(selected, params, header.media ?? undefined);
+    void sendTemplate(selected, params, header.media ?? undefined, extras);
   }
 
   const variables = selected ? extractVariables(selected.body_text) : [];
   const headerType = mediaHeaderType(selected);
+  const sendNeeds = selected ? templateSendNeeds(selected) : null;
+  const extrasProblem = sendNeeds ? sendExtrasProblem(sendNeeds, extras) : null;
   const canConfirm =
     !!selected &&
     variables.every((_, i) => (params[i] ?? "").trim().length > 0) &&
-    (!headerType || (!!header.media && !header.uploading));
+    (!headerType || (!!header.media && !header.uploading)) &&
+    !extrasProblem;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -248,6 +271,9 @@ export function TemplatePicker({
                 {header.error && <p className="text-xs text-warning">{header.error}</p>}
               </div>
             )}
+            {sendNeeds && hasSendNeeds(sendNeeds) && (
+              <TemplateSendExtrasFields needs={sendNeeds} extras={extras} onChange={setExtras} disabled={sending} />
+            )}
             <div className="rounded-md border border-border bg-surface p-3">
               <p className="mb-1 text-xs text-muted">Preview</p>
               {header.media?.previewUrl && (
@@ -289,6 +315,7 @@ export function TemplatePicker({
                 onClick={() => {
                   setSelected(null);
                   setParams([]);
+                  setExtras({});
                   header.reset();
                 }}
                 className="border-border text-foreground hover:bg-surface-light"

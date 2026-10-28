@@ -185,7 +185,7 @@ describe("helpers", () => {
     expect(
       parseStoredButtons([
         { type: "url", text: "Go", url: "https://s.example" },
-        { type: "COPY_CODE", text: "x" },
+        { type: "CATALOG", text: "x" },
         "junk",
       ]),
     ).toEqual([{ type: "URL", text: "Go", url: "https://s.example" }]);
@@ -265,5 +265,71 @@ describe("Meta template calls", () => {
     expect(headers.Authorization).toBe("OAuth token");
     expect(headers.file_offset).toBe("0");
     expect((calls[1].init?.body as ArrayBuffer).byteLength).toBe(4);
+  });
+});
+
+describe("WhatsApp Manager button types and location header", () => {
+  const buttonsOf = (args: Partial<BuildTemplateCreatePayloadArgs>) =>
+    buildTemplateCreatePayload({ ...base, ...args }).components.find((c) => c.type === "BUTTONS")?.buttons;
+
+  it("builds Call on WhatsApp, Complete flow, Copy offer code and Share contact info buttons", () => {
+    expect(
+      buttonsOf({
+        buttons: [
+          { type: "COPY_CODE", text: "", example: " DIWALI20 " },
+          { type: "VOICE_CALL", text: "Call Now" },
+          { type: "FLOW", text: "Book a visit", flow_id: "1234567890123", navigate_screen: "BOOKING" },
+          { type: "REQUEST_CONTACT_INFO", text: "Share contact info" },
+          { type: "QUICK_REPLY", text: "Interested" },
+        ],
+      }),
+    ).toEqual([
+      { type: "COPY_CODE", example: "DIWALI20" },
+      { type: "VOICE_CALL", text: "Call Now" },
+      { type: "FLOW", text: "Book a visit", flow_id: "1234567890123", flow_action: "navigate", navigate_screen: "BOOKING" },
+      { type: "REQUEST_CONTACT_INFO", text: "Share contact info" },
+      { type: "QUICK_REPLY", text: "Interested" },
+    ]);
+    expect(buttonsOf({ buttons: [{ type: "FLOW", text: "Open", flow_id: "98765" }] })).toEqual([
+      { type: "FLOW", text: "Open", flow_id: "98765", flow_action: "navigate" },
+    ]);
+  });
+
+  it("checks each new button against Meta's limits", () => {
+    expect(() => buttonsOf({ buttons: [{ type: "COPY_CODE", text: "" }] })).toThrow(/sample offer code/);
+    expect(() => buttonsOf({ buttons: [{ type: "COPY_CODE", text: "", example: "X".repeat(21) }] })).toThrow(/at most 20/);
+    expect(() =>
+      buttonsOf({ buttons: [{ type: "COPY_CODE", text: "", example: "A" }, { type: "COPY_CODE", text: "", example: "B" }] }),
+    ).toThrow(/only one "Copy offer code"/);
+    expect(() => buttonsOf({ buttons: [{ type: "VOICE_CALL", text: "Call our showroom today" }] })).toThrow(/at most 20/);
+    expect(() => buttonsOf({ buttons: [{ type: "FLOW", text: "Open", flow_id: "abc" }] })).toThrow(/Flow ID/);
+    expect(() => buttonsOf({ buttons: [{ type: "FLOW", text: "Open", flow_id: "12345", navigate_screen: "bad screen" }] })).toThrow(
+      /screen name/,
+    );
+    expect(() =>
+      buttonsOf({ buttons: [{ type: "QUICK_REPLY", text: "A" }, { type: "VOICE_CALL", text: "Call" }, { type: "QUICK_REPLY", text: "B" }] }),
+    ).toThrow(/next to each other/);
+  });
+
+  it("reserves a location header with no example", () => {
+    expect(buildTemplateCreatePayload({ ...base, header: { format: "LOCATION" } }).components[0]).toEqual({
+      type: "HEADER",
+      format: "LOCATION",
+    });
+  });
+
+  it("reads new button types back from a synced template", () => {
+    expect(
+      parseStoredButtons([
+        { type: "COPY_CODE", text: "Copy offer code", example: ["DIWALI20"] },
+        { type: "VOICE_CALL", text: "Call Now" },
+        { type: "FLOW", text: "Book", flow_id: 12345, flow_action: "navigate", navigate_screen: "START" },
+        { type: "CATALOG", text: "View" },
+      ]),
+    ).toEqual([
+      { type: "COPY_CODE", text: "Copy offer code", example: "DIWALI20" },
+      { type: "VOICE_CALL", text: "Call Now" },
+      { type: "FLOW", text: "Book", flow_id: "12345", navigate_screen: "START" },
+    ]);
   });
 });

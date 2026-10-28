@@ -18,25 +18,57 @@ export const TEMPLATE_LIMITS = {
   buttons: 10,
   urlButtons: 2,
   phoneButtons: 1,
+  /** Call on WhatsApp label; Meta defaults it to "Call Now". */
+  voiceCallText: 20,
+  /** The code a Copy offer code button copies. */
+  copyCode: 20,
 } as const
 
 export type TemplateSubmitCategory = 'MARKETING' | 'UTILITY'
 export type TemplateHeaderMediaFormat = 'IMAGE' | 'VIDEO' | 'DOCUMENT'
 
+/**
+ * Button types the CRM can create, named as in WhatsApp Manager:
+ * QUICK_REPLY "Custom", URL "Visit website", PHONE_NUMBER "Call phone number",
+ * VOICE_CALL "Call on WhatsApp", FLOW "Complete flow", COPY_CODE "Copy offer
+ * code", REQUEST_CONTACT_INFO "Share contact info".
+ */
+export const TEMPLATE_BUTTON_TYPES = [
+  'QUICK_REPLY',
+  'URL',
+  'PHONE_NUMBER',
+  'VOICE_CALL',
+  'FLOW',
+  'COPY_CODE',
+  'REQUEST_CONTACT_INFO',
+] as const
+
+export type TemplateButtonType = (typeof TEMPLATE_BUTTON_TYPES)[number]
+
 export interface TemplateButtonInput {
-  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER'
+  type: TemplateButtonType
+  /** Label. COPY_CODE has none: WhatsApp shows its own "Copy offer code". */
   text: string
   /** URL buttons. May end in {{1}} for a per-recipient suffix. */
   url?: string
-  /** Sample suffix for a URL ending in {{1}}. */
+  /**
+   * URL: sample suffix for a URL ending in {{1}}.
+   * COPY_CODE: the sample offer code (each send passes the real one).
+   */
   example?: string
   /** PHONE_NUMBER buttons, with country code. */
   phone_number?: string
+  /** FLOW buttons: the Flow's ID from WhatsApp Manager → Flows. */
+  flow_id?: string
+  /** FLOW buttons: screen to open; Meta defaults to the first screen. */
+  navigate_screen?: string
 }
 
 export type TemplateHeaderInput =
   | { format: 'TEXT'; text: string; example?: string }
   | { format: TemplateHeaderMediaFormat; handle: string }
+  // The pin is chosen at send time; the template only reserves the header.
+  | { format: 'LOCATION' }
 
 export interface BuildTemplateCreatePayloadArgs {
   name: string
@@ -169,6 +201,16 @@ function checkLength(label: string, text: string, max: number) {
 
 function buildButton(button: TemplateButtonInput, index: number): Record<string, unknown> {
   const label = `Button ${index + 1}`
+
+  // No label to check: WhatsApp always shows "Copy offer code".
+  if (button.type === 'COPY_CODE') {
+    const code = String(button.example ?? '').trim()
+    if (!code) throw new TemplateValidationError(`${label} needs a sample offer code, e.g. DIWALI20.`)
+    checkLength(`${label} offer code`, code, TEMPLATE_LIMITS.copyCode)
+    if (HAS_VARIABLE.test(code)) throw new TemplateValidationError(`${label} offer code can't contain variables.`)
+    return { type: 'COPY_CODE', example: code }
+  }
+
   const text = String(button.text ?? '').trim()
   if (!text) throw new TemplateValidationError(`${label} needs a label.`)
   checkLength(`${label} label`, text, TEMPLATE_LIMITS.buttonText)
@@ -177,6 +219,33 @@ function buildButton(button: TemplateButtonInput, index: number): Record<string,
   }
 
   if (button.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', text }
+
+  if (button.type === 'VOICE_CALL') {
+    checkLength(`${label} label`, text, TEMPLATE_LIMITS.voiceCallText)
+    return { type: 'VOICE_CALL', text }
+  }
+
+  if (button.type === 'REQUEST_CONTACT_INFO') return { type: 'REQUEST_CONTACT_INFO', text }
+
+  if (button.type === 'FLOW') {
+    const flowId = String(button.flow_id ?? '').trim()
+    if (!/^\d{5,30}$/.test(flowId)) {
+      throw new TemplateValidationError(
+        `${label} needs the Flow ID from WhatsApp Manager → Account tools → Flows (a long number).`,
+      )
+    }
+    const screen = String(button.navigate_screen ?? '').trim()
+    if (screen && !/^[A-Za-z][A-Za-z0-9_]*$/.test(screen)) {
+      throw new TemplateValidationError(`${label} screen name can only use letters, numbers and underscores.`)
+    }
+    return {
+      type: 'FLOW',
+      text,
+      flow_id: flowId,
+      flow_action: 'navigate',
+      ...(screen ? { navigate_screen: screen } : {}),
+    }
+  }
 
   if (button.type === 'PHONE_NUMBER') {
     const phone = String(button.phone_number ?? '').replace(/[\s()-]/g, '')
@@ -223,6 +292,16 @@ function buildButtons(buttons: TemplateButtonInput[]): Record<string, unknown> |
   }
   if (phones > TEMPLATE_LIMITS.phoneButtons) {
     throw new TemplateValidationError('A template can have only one call button.')
+  }
+  for (const [type, name] of [
+    ['COPY_CODE', 'Copy offer code'],
+    ['VOICE_CALL', 'Call on WhatsApp'],
+    ['FLOW', 'Complete flow'],
+    ['REQUEST_CONTACT_INFO', 'Share contact info'],
+  ] as const) {
+    if (buttons.filter((b) => b.type === type).length > 1) {
+      throw new TemplateValidationError(`A template can have only one "${name}" button.`)
+    }
   }
   // Quick replies must sit together: QR, QR, URL is fine; QR, URL, QR is not.
   const types = buttons.map((b) => (b.type === 'QUICK_REPLY' ? 'qr' : 'cta'))
@@ -275,6 +354,8 @@ export function buildTemplateCreatePayload(args: BuildTemplateCreatePayloadArgs)
         header.example = { header_text: requireExamples('header', 1, [args.header.example ?? '']) }
       }
       components.push(header)
+    } else if (args.header.format === 'LOCATION') {
+      components.push({ type: 'HEADER', format: 'LOCATION' })
     } else {
       const handle = args.header.handle.trim()
       if (!handle) throw new TemplateValidationError('Upload a sample file for the header.')
@@ -328,13 +409,18 @@ export function parseStoredButtons(value: unknown): TemplateButtonInput[] {
   for (const raw of value) {
     if (!raw || typeof raw !== 'object') continue
     const b = raw as Record<string, unknown>
-    const type = String(b.type ?? '').toUpperCase()
-    if (type !== 'QUICK_REPLY' && type !== 'URL' && type !== 'PHONE_NUMBER') continue
+    const type = String(b.type ?? '').toUpperCase() as TemplateButtonType
+    if (!TEMPLATE_BUTTON_TYPES.includes(type)) continue
+    // Meta returns the copy-code sample as a one-item array.
+    const example = Array.isArray(b.example) ? b.example[0] : b.example
     buttons.push({
       type,
       text: String(b.text ?? ''),
       ...(typeof b.url === 'string' ? { url: b.url } : {}),
       ...(typeof b.phone_number === 'string' ? { phone_number: b.phone_number } : {}),
+      ...(type === 'COPY_CODE' && example != null ? { example: String(example) } : {}),
+      ...(b.flow_id != null ? { flow_id: String(b.flow_id) } : {}),
+      ...(typeof b.navigate_screen === 'string' ? { navigate_screen: b.navigate_screen } : {}),
     })
   }
   return buttons

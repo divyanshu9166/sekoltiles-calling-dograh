@@ -10,6 +10,7 @@ import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/lib/use-broadcast-sending';
 import { useTemplateHeaderUpload } from '@/lib/whatsapp/use-template-header-upload';
+import type { TemplateSendExtras } from '@/lib/whatsapp/template-send-extras';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Check } from 'lucide-react';
 
@@ -44,10 +45,13 @@ export default function NewBroadcastPage() {
   const [name, setName] = useState('');
   const headerUpload = useTemplateHeaderUpload();
   const resetHeaderUpload = headerUpload.reset;
+  const [extras, setExtras] = useState<TemplateSendExtras>({});
 
-  // A header file belongs to the template it was chosen for.
+  // A header file and send values belong to the template they were chosen for.
   useEffect(() => {
     resetHeaderUpload();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExtras({});
   }, [template?.id, resetHeaderUpload]);
 
   async function handleSend(scheduledAt?: Date) {
@@ -69,6 +73,7 @@ export default function NewBroadcastPage() {
         headerMedia: headerUpload.media
           ? { type: headerUpload.media.type, id: headerUpload.media.id, filename: headerUpload.media.filename }
           : undefined,
+        extras,
         scheduledAt,
       });
       toast.success(scheduledAt ? 'Broadcast scheduled' : 'Broadcast is sending');
@@ -213,6 +218,8 @@ export default function NewBroadcastPage() {
               variables={variables}
               onUpdate={setVariables}
               headerUpload={headerUpload}
+              extras={extras}
+              onExtrasChange={setExtras}
               onNext={() => setCurrentStep(3)}
               onBack={() => setCurrentStep(1)}
             />
