@@ -3,6 +3,13 @@
 import { useState, useRef } from 'react';
 import { toast } from 'sonner';
 import {
+  IMPORT_BATCH_SIZE,
+  MAX_IMPORT_FILE_BYTES,
+  parseContactCsv,
+  readContactSheet,
+  type ContactImportRow,
+} from '@/lib/whatsapp/contact-import';
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -19,62 +26,7 @@ interface ImportModalProps {
   onImported: () => void;
 }
 
-interface ParsedRow {
-  phone: string;
-  name?: string;
-  email?: string;
-  company?: string;
-}
-
-function parseCSV(text: string): ParsedRow[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-
-  const headerLine = lines[0];
-  const headers = headerLine.split(',').map((h) => h.trim().toLowerCase().replace(/["']/g, ''));
-
-  const phoneIdx = headers.indexOf('phone');
-  if (phoneIdx === -1) return [];
-
-  const nameIdx = headers.indexOf('name');
-  const emailIdx = headers.indexOf('email');
-  const companyIdx = headers.indexOf('company');
-
-  const rows: ParsedRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    // Simple CSV parse (handles quoted fields)
-    const values: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    for (const char of line) {
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current.trim());
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current.trim());
-
-    const phone = values[phoneIdx]?.replace(/["']/g, '').trim();
-    if (!phone) continue;
-
-    rows.push({
-      phone,
-      name: nameIdx >= 0 ? values[nameIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-      email: emailIdx >= 0 ? values[emailIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-      company:
-        companyIdx >= 0 ? values[companyIdx]?.replace(/["']/g, '').trim() || undefined : undefined,
-    });
-  }
-
-  return rows;
-}
+type ParsedRow = ContactImportRow;
 
 export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -82,16 +34,25 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
   const [file, setFile] = useState<File | null>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ imported: number; failed: number } | null>(null);
+  const [parsing, setParsing] = useState(false);
+  const fileVersion = useRef(0);
+  const [skipped, setSkipped] = useState<{ invalidRows: number[]; duplicates: number }>({ invalidRows: [], duplicates: 0 });
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [result, setResult] = useState<{ imported: number; failed: number; existing: number } | null>(null);
 
   function reset() {
+    fileVersion.current++;
+    setParsing(false);
     setFile(null);
     setParsedRows([]);
+    setSkipped({ invalidRows: [], duplicates: 0 });
+    setProgress(null);
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
 
   function handleOpenChange(open: boolean) {
+    if (!open && importing) return; // let a running import finish
     if (!open) reset();
     onOpenChange(open);
   }
@@ -100,52 +61,80 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
     const selected = e.target.files?.[0];
     if (!selected) return;
 
+    const version = ++fileVersion.current;
     setFile(selected);
     setResult(null);
-
-    const text = await selected.text();
-    const rows = parseCSV(text);
-
-    if (rows.length === 0) {
-      toast.error('No valid rows found. Ensure CSV has a "phone" column header.');
-      setParsedRows([]);
-      return;
+    setParsedRows([]);
+    setSkipped({ invalidRows: [], duplicates: 0 });
+    setParsing(true);
+    try {
+      if (selected.size > MAX_IMPORT_FILE_BYTES) {
+        throw new Error(`Choose a file smaller than ${MAX_IMPORT_FILE_BYTES / 1024 / 1024} MB.`);
+      }
+      let values: unknown[][];
+      if (/\.xlsx$/i.test(selected.name)) {
+        const { readSheet } = await import('read-excel-file/browser');
+        values = await readSheet(selected);
+      } else if (/\.csv$/i.test(selected.name)) {
+        values = parseContactCsv(await selected.text());
+      } else throw new Error('Upload an Excel (.xlsx) or CSV (.csv) file.');
+      const sheet = readContactSheet(values);
+      if (!sheet.rows.length) {
+        throw new Error(
+          sheet.invalidRows.length
+            ? `No valid contacts found. Check company and phone (with country code) in rows ${sheet.invalidRows.slice(0, 5).join(', ')}.`
+            : 'No contacts found. Fill in company and phone below the headers.',
+        );
+      }
+      if (version === fileVersion.current) {
+        setParsedRows(sheet.rows);
+        setSkipped({ invalidRows: sheet.invalidRows, duplicates: sheet.duplicates });
+      }
+    } catch (error) {
+      if (version === fileVersion.current) toast.error(error instanceof Error ? error.message : 'Could not read this file.');
+    } finally {
+      if (version === fileVersion.current) setParsing(false);
     }
-
-    setParsedRows(rows);
   }
 
   async function handleImport() {
     if (parsedRows.length === 0) return;
     setImporting(true);
 
-    try {
-      const res = await fetch('/api/whatsapp/contacts/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: parsedRows }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.error || 'Import failed');
+    // Big sheets go up in batches so no single request is huge or slow.
+    const totals = { imported: 0, failed: 0, existing: 0 };
+    let stoppedAt: string | null = null;
+    setProgress({ done: 0, total: parsedRows.length });
+    for (let start = 0; start < parsedRows.length; start += IMPORT_BATCH_SIZE) {
+      const batch = parsedRows.slice(start, start + IMPORT_BATCH_SIZE);
+      try {
+        const res = await fetch('/api/whatsapp/contacts/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: batch }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `Import failed (HTTP ${res.status})`);
+        totals.imported += Number(data?.imported ?? 0);
+        totals.failed += Number(data?.failed ?? 0);
+        totals.existing += Number(data?.existing ?? 0);
+      } catch (err: unknown) {
+        stoppedAt = err instanceof Error ? err.message : 'Import failed';
+        totals.failed += parsedRows.length - start;
+        break;
       }
-
-      const imported = Number(data?.imported ?? 0);
-      const failed = Number(data?.failed ?? 0);
-      setResult({ imported, failed });
-      if (imported > 0) {
-        toast.success(`${imported} contact${imported !== 1 ? 's' : ''} imported`);
-        onImported();
-      }
-      if (failed > 0) {
-        toast.error(`${failed} contact${failed !== 1 ? 's' : ''} failed to import`);
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Import failed';
-      toast.error(message);
-    } finally {
-      setImporting(false);
+      setProgress({ done: Math.min(start + batch.length, parsedRows.length), total: parsedRows.length });
     }
+
+    setResult(totals);
+    setProgress(null);
+    setImporting(false);
+    if (totals.imported > 0) {
+      toast.success(`${totals.imported.toLocaleString()} contact${totals.imported !== 1 ? 's' : ''} imported`);
+      onImported();
+    }
+    if (stoppedAt) toast.error(`Import stopped: ${stoppedAt}`);
+    else if (totals.failed > 0) toast.error(`${totals.failed.toLocaleString()} contact${totals.failed !== 1 ? 's' : ''} failed to import`);
   }
 
   const preview = parsedRows.slice(0, 5);
@@ -156,12 +145,12 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
         <DialogHeader>
           <DialogTitle className="text-foreground">Import Contacts</DialogTitle>
           <DialogDescription className="text-muted">
-            Upload a CSV file with a &quot;phone&quot; column (required). Optional columns:
-            name, email, company.
+            Upload Excel (.xlsx) or CSV with two columns: company and phone. Include country code in the phone number.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
+          <a href="/templates/whatsapp-contacts.xlsx" download className="text-sm text-accent underline">Download Excel template</a>
           {/* Upload area */}
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -179,10 +168,10 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
               <>
                 <Upload className="size-8 text-muted" />
                 <p className="text-sm text-muted">
-                  Click to upload CSV file
+                  Click to upload Excel or CSV
                 </p>
                 <p className="text-xs text-muted">
-                  CSV with &quot;phone&quot; column required
+                  Required columns: company, phone
                 </p>
               </>
             )}
@@ -191,7 +180,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -207,18 +196,14 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
                   <thead>
                     <tr className="bg-surface-light">
                       <th className="px-3 py-1.5 text-left text-muted font-medium">Phone</th>
-                      <th className="px-3 py-1.5 text-left text-muted font-medium">Name</th>
-                      <th className="px-3 py-1.5 text-left text-muted font-medium">Email</th>
-                      <th className="px-3 py-1.5 text-left text-muted font-medium">Company</th>
+                                            <th className="px-3 py-1.5 text-left text-muted font-medium">Company</th>
                     </tr>
                   </thead>
                   <tbody>
                     {preview.map((row, i) => (
                       <tr key={i} className="border-t border-border">
                         <td className="px-3 py-1.5 text-foreground">{row.phone}</td>
-                        <td className="px-3 py-1.5 text-foreground">{row.name || '-'}</td>
-                        <td className="px-3 py-1.5 text-foreground">{row.email || '-'}</td>
-                        <td className="px-3 py-1.5 text-foreground">{row.company || '-'}</td>
+                                                <td className="px-3 py-1.5 text-foreground">{row.company || '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -226,9 +211,31 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
               </div>
               {parsedRows.length > 5 && (
                 <p className="text-xs text-muted">
-                  ...and {parsedRows.length - 5} more rows
+                  ...and {(parsedRows.length - 5).toLocaleString()} more rows
                 </p>
               )}
+              {(skipped.invalidRows.length > 0 || skipped.duplicates > 0) && (
+                <p className="text-xs text-amber-500">
+                  {skipped.invalidRows.length > 0 &&
+                    `${skipped.invalidRows.length.toLocaleString()} row${skipped.invalidRows.length !== 1 ? 's' : ''} skipped (no company or invalid phone): row ${skipped.invalidRows.slice(0, 8).join(', ')}${skipped.invalidRows.length > 8 ? '…' : ''}. `}
+                  {skipped.duplicates > 0 &&
+                    `${skipped.duplicates.toLocaleString()} repeated phone number${skipped.duplicates !== 1 ? 's' : ''} skipped.`}
+                </p>
+              )}
+            </div>
+          )}
+
+          {progress && (
+            <div className="space-y-1">
+              <div className="h-2 overflow-hidden rounded-full bg-surface-light">
+                <div
+                  className="h-full bg-accent transition-all"
+                  style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted">
+                Importing {progress.done.toLocaleString()} of {progress.total.toLocaleString()}… keep this window open.
+              </p>
             </div>
           )}
 
@@ -240,13 +247,19 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
                 {result.imported > 0 && (
                   <div className="flex items-center gap-1.5 text-accent text-sm">
                     <CheckCircle className="size-4" />
-                    {result.imported} imported
+                    {result.imported.toLocaleString()} imported
+                  </div>
+                )}
+                {result.existing > 0 && (
+                  <div className="flex items-center gap-1.5 text-muted text-sm">
+                    <CheckCircle className="size-4" />
+                    {result.existing.toLocaleString()} already in contacts
                   </div>
                 )}
                 {result.failed > 0 && (
                   <div className="flex items-center gap-1.5 text-red-400 text-sm">
                     <XCircle className="size-4" />
-                    {result.failed} failed
+                    {result.failed.toLocaleString()} failed
                   </div>
                 )}
               </div>
@@ -259,6 +272,7 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
             type="button"
             variant="outline"
             onClick={() => handleOpenChange(false)}
+            disabled={importing}
             className="border-border text-foreground hover:bg-surface-light"
           >
             {result ? 'Close' : 'Cancel'}
@@ -266,12 +280,12 @@ export function ImportModal({ open, onOpenChange, onImported }: ImportModalProps
           {!result && (
             <Button
               type="button"
-              disabled={parsedRows.length === 0 || importing}
+              disabled={parsedRows.length === 0 || importing || parsing}
               onClick={handleImport}
               className="bg-accent hover:bg-accent text-foreground"
             >
-              {importing && <Loader2 className="size-4 animate-spin" />}
-              Import {parsedRows.length > 0 ? `${parsedRows.length} Contacts` : ''}
+              {(importing || parsing) && <Loader2 className="size-4 animate-spin" />}
+              Import {parsedRows.length > 0 ? `${parsedRows.length.toLocaleString()} Contacts` : ''}
             </Button>
           )}
         </DialogFooter>
