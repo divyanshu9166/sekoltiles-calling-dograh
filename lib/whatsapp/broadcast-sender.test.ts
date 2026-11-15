@@ -485,6 +485,22 @@ describe('processBroadcast: template-wide errors', () => {
     await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
     expect(state.recipients.map((r) => r.status)).toEqual(['failed', 'sent'])
   })
+
+  it('does not send a contact whose variable would be empty, and names it', async () => {
+    const { store, state } = makeStore({
+      broadcast: { template_variables: { '1': { type: 'field', value: 'email' } } },
+      recipients: [
+        { id: 'r1', contact: contact('c1', '919876543210') },
+        { id: 'r2', contact: contact('c2', '919876543211', { email: 'sales@tao.in' }) },
+      ],
+    })
+    const { send, calls } = makeSender()
+    const result = await processBroadcast('b1', { store, send, ...fakeClock() }, { finalAttempt: false })
+    expect(calls.map((c) => c.to)).toEqual(['919876543211'])
+    expect(state.recipients.map((r) => r.status)).toEqual(['failed', 'sent'])
+    expect(state.recipients[0].error).toMatch(/\{\{1\}\} \(Contact field: Email Address\) is empty/)
+    expect(result.failed).toBe(1)
+  })
 })
 
 describe('classifySendError', () => {

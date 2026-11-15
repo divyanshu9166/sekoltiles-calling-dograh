@@ -235,6 +235,7 @@ export default function NewBroadcastPage() {
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
               hasHeaderMedia={!!headerUpload.media}
+              variables={variables}
             />
           )}
         </div>

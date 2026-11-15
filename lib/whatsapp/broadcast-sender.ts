@@ -25,7 +25,12 @@ import {
 import { describeStatusErrors } from '@/lib/whatsapp/delivery-errors'
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import { parseStoredSendParams } from '@/lib/whatsapp/template-send-extras'
-import { parseVariableMappings, resolveVariables } from '@/lib/whatsapp/broadcast-variables'
+import {
+  blankVariables,
+  blankVariablesReason,
+  parseVariableMappings,
+  resolveVariables,
+} from '@/lib/whatsapp/broadcast-variables'
 
 // ── Store ──────────────────────────────────────────────────────────────────
 
@@ -352,6 +357,14 @@ export async function processBroadcast(
     }
 
     const params = resolveVariables(variables, contact, recipient.customValues)
+    // Meta rejects an empty variable (#131008): skip the call and say which
+    // variable is missing for this contact.
+    const blank = blankVariables(variables, params)
+    if (blank.length) {
+      await store.markUnsent(recipient.id, 'failed', blankVariablesReason(variables, blank))
+      result.failed++
+      continue
+    }
 
     for (let attempt = 0; ; attempt++) {
       await throttle()

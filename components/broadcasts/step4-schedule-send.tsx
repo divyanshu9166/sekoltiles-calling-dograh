@@ -16,6 +16,7 @@ import {
 import { ArrowLeft, Send, Loader2, Users, Save, CalendarClock } from 'lucide-react';
 import { dateToIstInput, formatIst, istInputToDate } from '@/lib/whatsapp/ist-time';
 import { scheduleTooFarError } from '@/lib/whatsapp/broadcast-schedule';
+import type { VariableMapping } from '@/lib/whatsapp/broadcast-variables';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
 type CustomFieldOperator = 'is' | 'is_not' | 'contains';
@@ -47,6 +48,14 @@ interface Step4Props {
   isProcessing: boolean;
   /** The template's header photo/video/PDF is attached (limits how far ahead it can be scheduled). */
   hasHeaderMedia?: boolean;
+  /** Step 3's {{n}} mapping, to warn about contacts whose value is empty. */
+  variables?: Record<string, VariableMapping>;
+}
+
+interface BlankVariable {
+  key: string;
+  count: number;
+  source: string;
 }
 
 /** One hour from now, rounded up to the next quarter hour, in IST. */
@@ -65,6 +74,7 @@ export function Step4ScheduleSend({
   onBack,
   isProcessing,
   hasHeaderMedia = false,
+  variables,
 }: Step4Props) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [when, setWhen] = useState<'now' | 'later'>('now');
@@ -87,6 +97,8 @@ export function Step4ScheduleSend({
   const canSend = !!name.trim() && !isProcessing && !scheduleError;
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [optedOutCount, setOptedOutCount] = useState(0);
+  const [blankContacts, setBlankContacts] = useState(0);
+  const [blankVariables, setBlankVariables] = useState<BlankVariable[]>([]);
   const [loadingReach, setLoadingReach] = useState(true);
 
   useEffect(() => {
@@ -101,13 +113,15 @@ export function Step4ScheduleSend({
         const res = await fetch('/api/whatsapp/broadcasts/audience-preview', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audience })
+          body: JSON.stringify({ audience, variables })
         });
-        
+
         if (res.ok) {
-          const { count, opted_out } = await res.json();
+          const { count, opted_out, blank_contacts, blank_variables } = await res.json();
           setEstimatedReach(count ?? 0);
           setOptedOutCount(opted_out ?? 0);
+          setBlankContacts(blank_contacts ?? 0);
+          setBlankVariables(Array.isArray(blank_variables) ? blank_variables : []);
         } else {
           setEstimatedReach(0);
         }
@@ -119,7 +133,7 @@ export function Step4ScheduleSend({
     }
 
     calculateReach();
-  }, [audience]);
+  }, [audience, variables]);
 
   const audienceLabel =
     audience.type === 'all'
@@ -154,10 +168,10 @@ export function Step4ScheduleSend({
       {/* Summary Card */}
       <div className="glass-card p-4 space-y-3">
         <p className="text-sm font-medium text-foreground">Summary</p>
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
+        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+          <div className="min-w-0">
             <p className="text-xs text-muted">Template</p>
-            <p className="text-foreground">{template.name}</p>
+            <p className="mt-1 leading-6 text-foreground [overflow-wrap:anywhere]">{template.name}</p>
           </div>
           <div>
             <p className="text-xs text-muted">Audience</p>
@@ -165,7 +179,7 @@ export function Step4ScheduleSend({
           </div>
           <div>
             <p className="text-xs text-muted">Estimated Reach</p>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {loadingReach ? (
                 <Loader2 className="h-3 w-3 animate-spin text-accent" />
               ) : (
@@ -187,6 +201,27 @@ export function Step4ScheduleSend({
           </div>
         </div>
       </div>
+
+      {!loadingReach && blankContacts > 0 && (
+        <div role="alert" className="rounded-md border border-warning/30 bg-warning-light px-3 py-2.5 text-sm text-warning space-y-1">
+          <p className="font-medium">
+            {blankContacts === estimatedReach
+              ? `All ${estimatedReach.toLocaleString()} contacts are missing a template value, so nobody would get this broadcast.`
+              : `${blankContacts.toLocaleString()} of ${estimatedReach.toLocaleString()} contacts are missing a template value. They will be skipped, not sent.`}
+          </p>
+          <ul className="list-disc pl-5 text-xs">
+            {blankVariables.map((v) => (
+              <li key={v.key}>
+                {`{{${v.key}}}`} ({v.source}) is empty for {v.count.toLocaleString()} contact{v.count !== 1 ? 's' : ''}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs">
+            WhatsApp rejects a template with an empty value. Go back and map it to a field every contact has (e.g.
+            Contact Name), or use a static value.
+          </p>
+        </div>
+      )}
 
       {/* When to send */}
       <div className="space-y-3">
@@ -261,7 +296,7 @@ export function Step4ScheduleSend({
           Back
         </Button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
           {onSaveDraft && (
             <Button
               variant="outline"
@@ -286,18 +321,17 @@ export function Step4ScheduleSend({
               {when === 'later' ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               {when === 'later' ? 'Schedule Broadcast' : 'Send Broadcast'}
             </DialogTrigger>
-            <DialogContent className="sm:max-w-md">
-              <DialogHeader>
+            <DialogContent className="min-w-0 max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+              <DialogHeader className="min-w-0 pr-6">
                 <DialogTitle className="text-foreground">
                   {when === 'later' ? 'Confirm Schedule' : 'Confirm Broadcast'}
                 </DialogTitle>
-                <DialogDescription className="text-muted">
+                <DialogDescription className="leading-6 text-muted [overflow-wrap:anywhere]">
                   {when === 'later' && scheduledAt ? (
                     <>
                       This broadcast will go to about{' '}
                       <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
-                      contacts using the{' '}
-                      <span className="font-medium text-foreground">{template.name}</span> template on{' '}
+                      contacts on{' '}
                       <span className="font-medium text-foreground">{formatIst(scheduledAt)}</span>.
                       You can cancel it until then.
                     </>
@@ -305,18 +339,21 @@ export function Step4ScheduleSend({
                     <>
                       You are about to send this broadcast to{' '}
                       <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
-                      contacts using the{' '}
-                      <span className="font-medium text-foreground">{template.name}</span> template.
+                      contacts.
                       It keeps sending even if you close this tab.
                     </>
                   )}
                 </DialogDescription>
               </DialogHeader>
-              <DialogFooter>
+              <div className="min-w-0 rounded-lg border border-border bg-surface-light p-3">
+                <p className="mb-1 text-xs font-medium text-muted">Selected template</p>
+                <p className="text-sm font-medium leading-6 text-foreground [overflow-wrap:anywhere]">{template.name}</p>
+              </div>
+              <DialogFooter className="min-w-0">
                 <Button
                   variant="outline"
                   onClick={() => setShowConfirm(false)}
-                  className="border-border text-muted"
+                  className="w-full border-border text-muted sm:w-auto"
                 >
                   Cancel
                 </Button>
@@ -326,7 +363,7 @@ export function Step4ScheduleSend({
                     onSend(scheduledAt ?? undefined);
                   }}
                   disabled={!canSend}
-                  className="bg-accent text-white hover:bg-accent-hover"
+                  className="w-full bg-accent text-white hover:bg-accent-hover sm:w-auto"
                 >
                   {when === 'later' ? <CalendarClock className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                   {when === 'later' ? 'Confirm and Schedule' : 'Confirm and Send'}
